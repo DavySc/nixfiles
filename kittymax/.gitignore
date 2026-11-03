@@ -1,0 +1,3 @@
+local.el
+*.elc
+*.eln

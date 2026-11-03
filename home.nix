@@ -1,37 +1,8 @@
 { config, pkgs, ... }:
 let
-  # Kakoune with the tools my-kak calls. They go at the END of PATH, so a
-  # project's dev shell (its own clangd, rust-analyzer ...) wins. Tools that
-  # are already in home.packages below (fd, ripgrep, git, nil, nixfmt,
-  # lua-language-server, stylua, gcc) are not repeated here.
-  kakTools = with pkgs; [
-    kakoune-lsp
-    fzf
-    bat
-    lazygit
-    tmux # pickers, the Claude pane and popups need a windowing environment
-    wl-clipboard # WSLg provides the Wayland socket; kak-clip falls back to clip.exe
-    clang-tools # clangd and clang-format
-    gdb
-    cmake
-    ninja
-    glsl_analyzer
-    verible
-    verilator
-    iverilog
-    marksman
-    prettier
-  ];
-
-  kak = pkgs.symlinkJoin {
-    name = "kak-${pkgs.kakoune-unwrapped.version}-with-tools";
-    paths = [ pkgs.kakoune ];
-    nativeBuildInputs = [ pkgs.makeWrapper ];
-    postBuild = ''
-      wrapProgram $out/bin/kak --suffix PATH : ${pkgs.lib.makeBinPath kakTools}
-    '';
-    meta.mainProgram = "kak";
-  };
+  # Emacs: kittymax, with its packages, language servers and tools (kittymax/).
+  # The Lisp is read live from this checkout, see xdg.configFile below.
+  kittymax = import ./kittymax/package.nix { inherit pkgs; };
 in
 {
   home.username = "nixos";
@@ -43,7 +14,7 @@ in
   # Keep the list short. Project-specific toolchains belong in per-project devShells.
   home.packages = with pkgs; [
     neovim
-    kak
+    kittymax
     ripgrep
     rustc
     cargo
@@ -59,7 +30,14 @@ in
     lua-language-server
     stylua
     tree-sitter
+    # kittymax: icons and the prose font
+    nerd-fonts.jetbrains-mono
+    nerd-fonts.symbols-only
+    inter
   ];
+
+  # Make the fonts above visible to Emacs (and everything else) under WSLg.
+  fonts.fontconfig.enable = true;
 
   home.sessionVariables.EDITOR = "nvim";
   home.sessionVariables.RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
@@ -74,9 +52,11 @@ in
   };
   xdg.configFile."nvim".source =
     config.lib.file.mkOutOfStoreSymlink "${config.home.homeDirectory}/my-nvim";
-  # Same idea for Kakoune: the config lives in this repo (kak/), read live from
-  # ~/.config/kak, so editing it and <space>R needs no rebuild.
-  xdg.configFile."kak".source = config.lib.file.mkOutOfStoreSymlink "${config.home.homeDirectory}/nixfiles/kak";
+  # kittymax's Lisp lives in this repo (kittymax/) and is read live through
+  # ~/.config/kittymax: editing it and `SPC h r` needs no rebuild. Packages and
+  # tools (kittymax/package.nix) do need one.
+  xdg.configFile."kittymax".source =
+    config.lib.file.mkOutOfStoreSymlink "${config.home.homeDirectory}/nixfiles/kittymax";
 
   programs.home-manager.enable = true;
 }

@@ -1,0 +1,139 @@
+# kittymax
+
+A Doom-inspired Emacs on [meow](https://github.com/meow-edit/meow) (selection
+first, then the verb) with catppuccin mocha, built for NixOS. Fast to start,
+real multiple cursors, and good at the things I write: org, markdown, C, C++,
+C#, SQL, Verilog / SystemVerilog, Nix.
+
+```
+early-init.el        before the first frame: GC off, no flash, package-quickstart
+init.el              loads the modules below
+lisp/kitty-lib       loader (compiles into the cache), keymap helpers, SPC m
+lisp/kitty-core      defaults, performance, state directories
+lisp/kitty-ui        catppuccin mocha, doom-modeline, fonts, icons, which-key, splash
+lisp/kitty-meow      modal editing and the SPC leader tree
+lisp/kitty-mc        multiple cursors on meow's beacon
+lisp/kitty-completion vertico orderless marginalia consult embark corfu cape
+lisp/kitty-vc        magit, diff-hl
+lisp/kitty-dired     dired + dirvish
+lisp/kitty-org       org-mode
+lisp/kitty-markdown  the markdown editing experience
+lisp/kitty-prog      tree-sitter, eglot (+ emacs-lsp-booster), flymake, apheleia
+lisp/lang/           c, csharp, sql, verilog, nix
+package.nix          Emacs with all packages + language servers + tools = `kittymax`
+test/                ERT tests (test/run.sh)
+```
+
+## Install
+
+It is wired into `home.nix` already: `sudo nixos-rebuild switch --flake ~/nixfiles#wsl`,
+then `kittymax` (a window through WSLg) or `kittymax -nw`.
+
+The Lisp is **not** in the Nix store: `~/.config/kittymax` is a symlink to this
+directory, so editing a file and `SPC h r` (reload) needs no rebuild. Adding a
+package or a tool to `package.nix` does.
+
+Per-machine settings go in `kittymax/local.el` (git-ignored): `org-directory`,
+`kitty-font-size`, SQL connections ...
+
+## Keys
+
+meow's normal state, QWERTY layout. You select, then act:
+
+| Select | | Act | | Move | |
+| --- | --- | --- | --- | --- | --- |
+| `w` `W` word, symbol | | `d` delete (`D` backwards) | | `h j k l` | `H J K L` extend |
+| `x` line | | `c` change | | `b` `e` word back / forward | |
+| `o` block | | `s` kill, `y` copy, `p` paste | | `f` `t` find / till char | |
+| `,` `.` inner / bounds of a thing | | `i` `a` insert / append, `I` `A` open line | | `v` visit, `n` next match | |
+| `[` `]` beginning / end of a thing | | `r` replace, `m` join | | `/` search the buffer | |
+| `g` cancel selection | | `u` undo, `U` in selection | | `Q` goto line | |
+
+Things after `,` / `.`: `r` round, `s` square, `c` curly, `a` angle, `g` string,
+`e` symbol, `p` paragraph, `l` line, `d` defun, `b` buffer.
+
+`SPC` opens the leader tree (which-key shows it); `SPC x` is the `C-x` map.
+
+| | | | |
+| --- | --- | --- | --- |
+| `SPC SPC` commands | `SPC .` find file | `SPC ,` buffers | `SPC /` ripgrep |
+| `SPC b` buffer | `SPC f` file | `SPC p` project | `SPC g` git |
+| `SPC w` window | `SPC s` search | `SPC c` code | `SPC o` open |
+| `SPC n` notes | `SPC t` toggle | `SPC h` help | `SPC q` quit |
+| `SPC k` cursors | `SPC j` jump | `SPC i` insert | `SPC m` **this mode's keys** |
+
+`SPC m` changes with the mode (org, markdown, C, C#, SQL, Verilog ...): look at
+it with which-key whenever you are in one.
+
+## Multiple cursors
+
+meow does not copy editor state to a pile of cursors; it records a keyboard
+macro and replays it at every position you picked, which stays fast with
+thousands. The picking is what these commands do:
+
+| Keys | |
+| --- | --- |
+| `C` | add a cursor on the next match of the selection (or the symbol at point). Press again for the next. `SPC k p` goes backwards, `SPC k u` drops the last. |
+| `M` | cursors on every match in the buffer |
+| `SPC k l` | a cursor on every line of the region (`C-u`: keep the column) |
+| `SPC k r` | cursors on every regexp match inside the region |
+| `<escape>` | leave multiple-cursor mode |
+
+Then edit normally: `c` changes at every cursor, `i` / `a` insert / append at
+each, `d` deletes. For anything more, `F3` ... `F4` records a macro and applies
+it to all of them. `G` (grab) restricts the cursors to a region first.
+
+## Markdown
+
+`.md` is `gfm-mode`. Prose in a proportional font in a centred column, headings
+scaled, tables aligned (valign), code in monospace. Markup (`**`, `#`, backticks,
+link targets) is hidden except on the line you are on. Lists, checkboxes and
+tables continue as you type; `RET` on a link follows it, on a task toggles it.
+Images show inline; `SPC m i p` pastes one from the clipboard into `assets/`.
+Code blocks are highlighted in their language, `SPC m e` edits one in its own
+buffer. marksman completes and checks links and headings, `SPC m p` previews
+live, `SPC m E` exports with pandoc, `SPC m i T` writes a table of contents.
+Prettier formats on request only (`SPC c f`), never on save.
+
+## Languages
+
+| | server | format | `SPC m` |
+| --- | --- | --- | --- |
+| C / C++ | clangd | clang-format (with a `.clang-format`) | CMake/Ninja or Make, run, ctest, gdb, header/source |
+| C# | csharp-ls | the server, on save | `dotnet` build / run / test / watch, add package |
+| SQL | sqls (`SPC m L`) | pg_format | connect, send paragraph / region / buffer, describe table |
+| Verilog, SystemVerilog | verible | verible | verilator lint, iverilog + vvp, gtkwave, AUTOs, templates |
+| Nix | nil | nixfmt | rebuild |
+
+Verilog buffers are also linted by verilator as you type (flymake), for the
+checks a language server does not do: widths, unused and undriven signals.
+
+C# needs the .NET SDK: kittymax carries one, a project's dev shell wins.
+
+## Why it starts fast
+
+- Garbage collection is off until startup ends, then gcmh keeps it high while
+  typing and collects when idle. File-name handlers are off during startup.
+- Packages come from Nix: no package.el network, and package-quickstart merges
+  all autoloads into one file (rebuilt when the package set changes).
+- The Lisp in this directory is byte-compiled into `~/.cache/kittymax/elc` on
+  first use (and again when a file changes); Emacs native-compiles it in the
+  background after that.
+- Everything optional is deferred: modes load with their files, not at startup.
+- Rendering and LSP are tuned: `jit-lock` deferral, no bidi scanning, a 4 MB
+  process read size, emacs-lsp-booster for JSON, no events buffer, so-long.
+
+`SPC h s` prints what startup cost, module by module.
+
+## Tests
+
+```sh
+kittymax/test/run.sh
+```
+
+loads the real meow, markdown-mode and verilog-mode: multiple cursors on a
+live meow beacon (every command above, with edits applied), the markdown
+reveal-on-current-line behaviour, the verilator flymake backend against a fake
+verilator, the loader and keymap helpers, and a smoke test that loads the whole
+configuration with no third-party packages at all and checks it degrades
+instead of failing.
