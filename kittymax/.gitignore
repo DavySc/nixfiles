@@ -1,3 +1,14 @@
 local.el
 *.elc
 *.eln
+# state Emacs writes into its init directory if no-littering is not active
+/history
+/recentf.eld
+/places
+/auto-save-list/
+/eln-cache/
+/transient/
+/custom.el
+/package-quickstart.el*
+/url/
+/tramp
