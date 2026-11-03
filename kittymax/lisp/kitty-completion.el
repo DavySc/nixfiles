@@ -61,11 +61,14 @@
       xref-show-definitions-function #'consult-xref)
 
 (with-eval-after-load 'consult
-  ;; Previews that would be slow or noisy only appear on demand.
-  (consult-customize
-   consult-ripgrep consult-git-grep consult-grep consult-recent-file
-   consult-bookmark consult-xref
-   :preview-key '(:debounce 0.4 any)))
+  ;; Previews that would be slow or noisy only appear on demand.  `consult-customize'
+  ;; is a macro of consult, which is not loaded when this file is compiled, so
+  ;; it is expanded when it runs rather than compiled as a function call.
+  (eval '(consult-customize
+          consult-ripgrep consult-git-grep consult-grep consult-recent-file
+          consult-bookmark consult-xref
+          :preview-key '(:debounce 0.4 any))
+        t))
 
 (global-set-key [remap switch-to-buffer] #'consult-buffer)
 (global-set-key [remap switch-to-buffer-other-window] #'consult-buffer-other-window)
