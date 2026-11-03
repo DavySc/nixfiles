@@ -62,18 +62,11 @@ in
   #  config.lib.file.mkOutOfStoreSymlink "${config.home.homeDirectory}/kak-test/lsp";
   xdg.configFile."nvim".source =
     config.lib.file.mkOutOfStoreSymlink "${config.home.homeDirectory}/my-nvim";
-<<<<<<< HEAD
   # kittymax's Lisp lives in this repo (kittymax/) and is read live through
   # ~/.config/kittymax: editing it and `SPC h r` needs no rebuild. Packages and
   # tools (kittymax/package.nix) do need one.
   xdg.configFile."kittymax".source =
     config.lib.file.mkOutOfStoreSymlink "${config.home.homeDirectory}/nixos-config/kittymax";
-=======
-  # Same idea for Kakoune: the config lives in this repo (kak/), read live from
-  # ~/.config/kak, so editing it and <space>R needs no rebuild.
-  xdg.configFile."kak".source =
-    config.lib.file.mkOutOfStoreSymlink "${config.home.homeDirectory}/nixfiles/kak";
->>>>>>> 7106e36 (bla)
 
   xdg.configFile."emacs/init.el".source =
     config.lib.file.mkOutOfStoreSymlink "${config.home.homeDirectory}/emacs-test/init.el";
