@@ -8,6 +8,8 @@ C#, SQL, Verilog / SystemVerilog, Nix.
 ```
 early-init.el        before the first frame: GC off, no flash, package-quickstart
 init.el              loads the modules below
+lisp/kitty-platform  Nix vs Windows: state directories, where packages come from
+lisp/kitty-packages  the package list; installs it from ELPA/MELPA without Nix
 lisp/kitty-lib       loader (compiles into the cache), keymap helpers, SPC m
 lisp/kitty-core      defaults, performance, state directories
 lisp/kitty-ui        catppuccin mocha, doom-modeline, fonts, icons, which-key, splash
@@ -22,6 +24,7 @@ lisp/kitty-markdown  the markdown editing experience
 lisp/kitty-prog      tree-sitter, eglot (+ emacs-lsp-booster), flymake, apheleia
 lisp/lang/           c, csharp, sql, verilog, nix
 package.nix          Emacs with all packages + language servers + tools = `kittymax`
+windows/             kittymax.cmd (launcher) and install.ps1 (winget) for native Windows
 test/                ERT tests (test/run.sh)
 ```
 
@@ -36,6 +39,48 @@ package or a tool to `package.nix` does.
 
 Per-machine settings go in `kittymax/local.el` (git-ignored): `org-directory`,
 `kitty-font-size`, SQL connections ...
+
+## Native Windows
+
+The same configuration runs on Windows without Nix. The difference is only
+where things come from: instead of the Nix profile, Emacs installs its
+packages from ELPA and MELPA on the first start (a few minutes, once), into
+`%LOCALAPPDATA%\kittymax\data\elpa`. Nothing is written into the checkout.
+
+1. Clone the repository, e.g. `git clone <url> %USERPROFILE%\nixos-config`.
+2. Run the installer (needs `winget`, which Windows 10/11 has):
+
+   ```
+   powershell -ExecutionPolicy Bypass -File windows\install.ps1
+   ```
+
+   It installs Emacs, git, ripgrep, fd, clangd + clang-format (LLVM), the .NET
+   SDK, pandoc and the JetBrainsMono Nerd Font, `csharp-ls` as a dotnet tool,
+   and puts a `kittymax` shortcut on the desktop. Or install those yourself.
+3. Start it with the shortcut or `windows\kittymax.cmd [file]`. That is
+   `emacs --init-directory <checkout>\kittymax`.
+
+Different on Windows:
+
+- **Tree-sitter grammars** are not bundled. `treesit-auto` offers to build the
+  one a file needs (it needs a C compiler, e.g. from MSYS2); until then the
+  classic mode of that language is used, which is fine.
+- **Not installed** because they need a Unix pty, a native module or a binary
+  Windows lacks: `eat` (`SPC o t` opens eshell instead), `jinx` (spell
+  checking uses flyspell if aspell/hunspell is on `PATH`), `eglot-booster`.
+- **Language servers and tools** that winget has no package for: install
+  verible, verilator and iverilog (hardware) and sqls (SQL) yourself and put
+  them on `PATH`; kittymax uses what it finds. `SPC o s` (psql) needs the
+  PostgreSQL client tools.
+- `SPC f u` (sudo) does not exist; pasting an image from the clipboard
+  (`SPC m i p`) goes through PowerShell; dired uses Emacs's own `ls`.
+- State is under `%LOCALAPPDATA%\kittymax` (`data` kept, `cache` disposable,
+  e.g. the compiled configuration).
+
+`KITTYMAX_PACKAGES` picks the package source: `nix` (set by the Nix wrapper),
+`none` (use what is installed, never touch the network) or unset (install from
+ELPA). `KITTYMAX_FRAME=windowed` or `maximized` replaces the full-screen start.
+`M-x kitty-install-packages` retries a failed install.
 
 ## Keys
 

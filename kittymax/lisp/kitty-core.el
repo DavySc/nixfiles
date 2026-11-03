@@ -22,6 +22,12 @@
 (when (file-exists-p custom-file) (load custom-file nil 'nomessage))
 (when (fboundp 'no-littering-theme-backups) (no-littering-theme-backups))
 
+;;;; Text encoding: UTF-8 everywhere (Windows defaults to a legacy code page)
+
+(set-language-environment "UTF-8")
+(prefer-coding-system 'utf-8)
+(set-default-coding-systems 'utf-8)
+
 ;;;; Performance
 
 ;; Garbage collection: huge while Emacs is busy starting, then gcmh keeps it
@@ -40,6 +46,13 @@
 ;; Language servers talk a lot: the default 4k read size is far too small.
 (setq read-process-output-max (* 4 1024 1024)
       process-adaptive-read-buffering t)
+
+;; Windows: asking the file system for every file's attributes, and the default
+;; pipe buffering, are the slow parts of Emacs there (git, LSP, ripgrep).
+(when (kitty-windows-p)
+  (setq w32-get-true-file-attributes nil
+        w32-pipe-read-delay 0
+        w32-pipe-buffer-size (* 64 1024)))
 
 ;; Rendering: skip work that does not change what is on screen.
 (setq-default bidi-paragraph-direction 'left-to-right

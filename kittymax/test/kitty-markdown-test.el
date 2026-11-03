@@ -84,4 +84,28 @@
       (should (keymapp map))
       (should (eq 'kitty-markdown-preview (lookup-key map (kbd "p")))))))
 
+(ert-deftest kitty-markdown-clipboard-image-uses-powershell-on-windows ()
+  (let (called (system-type 'windows-nt) (orig (symbol-function 'call-process)))
+    (fset 'call-process (lambda (&rest args) (setq called args) 0))
+    ;; only exists on a real Windows Emacs; `convert-standard-filename' calls it there
+    (fset 'w32-convert-standard-filename #'identity)
+    (unwind-protect
+        (progn
+          (should (= 0 (kitty-markdown--save-clipboard-image "C:/notes/it's.png")))
+          (should (equal "powershell" (car called)))
+          (let ((cmd (car (last called))))
+            (should (string-match-p "GetImage" cmd))
+            (should (string-match-p "C:/notes/it''s.png" cmd))))   ; quote doubled for PowerShell
+      (fset 'call-process orig)
+      (fmakunbound 'w32-convert-standard-filename))))
+
+(ert-deftest kitty-markdown-clipboard-image-uses-wl-paste-elsewhere ()
+  (let (cmd (system-type 'gnu/linux) (orig (symbol-function 'call-process-shell-command)))
+    (fset 'call-process-shell-command (lambda (c &rest _) (setq cmd c) 0))
+    (unwind-protect
+        (progn (kitty-markdown--save-clipboard-image "/tmp/x y.png")
+               (should (string-match-p "\\`wl-paste --type image/png > " cmd))
+               (should (string-match-p "x\\\\ y.png" cmd)))
+      (fset 'call-process-shell-command orig))))
+
 ;;; kitty-markdown-test.el ends here

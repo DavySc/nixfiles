@@ -17,32 +17,39 @@
                   (delete-dups (append file-name-handler-alist
                                        kitty--file-name-handler-alist)))))
 
-;; Where the writable things live: keep the config directory (a git checkout)
-;; clean. Native-compiled code goes to the cache too.
+;; Platform differences (Nix vs native Windows) live in one small file.
 (defvar kitty-config-dir (file-name-as-directory user-emacs-directory)
   "The checkout this configuration is loaded from.")
-(defvar kitty-data-dir
-  (file-name-as-directory
-   (expand-file-name "kittymax" (or (getenv "XDG_DATA_HOME") "~/.local/share")))
-  "Persistent state: history, recent files, org-roam ...")
-(defvar kitty-cache-dir
-  (file-name-as-directory
-   (expand-file-name "kittymax" (or (getenv "XDG_CACHE_HOME") "~/.cache")))
+(load (expand-file-name "lisp/kitty-platform" kitty-config-dir) nil t)
+
+;; Where the writable things live: keep the config directory (a git checkout)
+;; clean. Native-compiled code goes to the cache too.
+(defvar kitty-data-dir (kitty-state-dir 'data)
+  "Persistent state: history, recent files, ELPA packages on Windows ...")
+(defvar kitty-cache-dir (kitty-state-dir 'cache)
   "Disposable state: compiled configuration, native-comp cache, eln.")
 (make-directory kitty-data-dir t)
 (make-directory kitty-cache-dir t)
 
-;; Packages come from Nix (see package.nix), already on `load-path'.  Their
-;; autoloads are what package.el must still activate; package-quickstart
-;; merges all of them into one file, so that costs one `load' instead of one
-;; per package.  The file is rebuilt after Emacs is up whenever the Nix
-;; package set (the site-lisp directories on `load-path') has changed.
-(require 'seq)
-(defvar kitty--package-key
-  (mapconcat #'identity
-             (seq-filter (lambda (d) (string-match-p "/share/emacs/site-lisp/?\\'" d))
-                         load-path)
-             ":")
+;; Packages.  Under Nix they come from the profile (see package.nix) and are
+;; already on `load-path'.  Anywhere else (native Windows) package.el installs
+;; them from ELPA and MELPA into the data directory, on first start
+;; (lisp/kitty-packages.el).  Either way package.el activates them, and
+;; package-quickstart merges all their autoloads into one file, so that costs
+;; one `load' instead of one per package.  The file is rebuilt after Emacs is
+;; up whenever the installed package set has changed.
+(defvar kitty-nix-p (kitty-nix-p)
+  "Non-nil when the packages are provided by Nix.")
+;; (Never inside this checkout, whatever the source.)
+(setq package-user-dir (expand-file-name "elpa/" kitty-data-dir))
+(unless kitty-nix-p
+  (setq package-archives '(("gnu" . "https://elpa.gnu.org/packages/")
+                           ("nongnu" . "https://elpa.nongnu.org/nongnu/")
+                           ("melpa" . "https://melpa.org/packages/"))
+        package-archive-priorities '(("gnu" . 3) ("nongnu" . 2) ("melpa" . 1)))
+  ;; Signature checks need gpg, which a plain Windows does not have.
+  (unless (executable-find "gpg") (setq package-check-signature nil)))
+(defvar kitty--package-key (kitty-package-key kitty-nix-p (bound-and-true-p package-user-dir))
   "Identifies the installed package set.")
 (setq package-enable-at-startup t
       package-quickstart t
@@ -60,7 +67,8 @@
                  (lambda ()
                    (require 'package)
                    (package-quickstart-refresh)
-                   (with-temp-file key-file (insert kitty--package-key))))))))
+                   (with-temp-file key-file
+                     (insert (kitty-package-key kitty-nix-p package-user-dir)))))))))
 
 (when (boundp 'native-comp-eln-load-path)
   (startup-redirect-eln-cache (expand-file-name "eln/" kitty-cache-dir)))

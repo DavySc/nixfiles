@@ -13,8 +13,11 @@
 
 ;;;; Tree-sitter
 
+;; Under Nix the grammars are provided; elsewhere treesit-auto offers to build
+;; the one a file needs (it needs a C compiler), and until then the classic
+;; mode is used.
 (setq treesit-font-lock-level 4
-      treesit-auto-install nil)         ; grammars are provided by Nix
+      treesit-auto-install (if (kitty-nix-p) nil 'prompt))
 
 (add-hook 'emacs-startup-hook
           (lambda ()

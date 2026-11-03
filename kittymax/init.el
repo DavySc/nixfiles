@@ -3,6 +3,8 @@
 ;; A Doom-inspired, meow-based Emacs. This file only wires the modules in
 ;; lisp/ together; each one is a few hundred lines about one topic.
 ;;
+;;   kitty-platform    Nix vs Windows: state directories, where packages come from
+;;   kitty-packages    the package list, and installing it without Nix
 ;;   kitty-lib         loader (byte-compiles into the cache), macros, local leader
 ;;   kitty-core        defaults, performance, state directories
 ;;   kitty-ui          catppuccin mocha, modeline, fonts, icons, which-key
@@ -21,6 +23,10 @@
 (add-to-list 'load-path (expand-file-name "lisp" kitty-config-dir))
 (add-to-list 'load-path (expand-file-name "lisp/lang" kitty-config-dir))
 (require 'kitty-lib)
+
+;; Without Nix (native Windows): install the packages on the first start.
+(require 'kitty-packages)
+(kitty-ensure-packages)
 
 (kitty-load 'kitty-core)
 (kitty-load 'kitty-ui)

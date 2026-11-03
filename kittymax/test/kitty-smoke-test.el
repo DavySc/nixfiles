@@ -14,6 +14,8 @@
 (defun kitty-test--boot ()
   "Load early-init.el and init.el with state redirected to temporary directories."
   (let ((home (make-temp-file "kitty-home" t)))
+    ;; packages are whatever is installed here: never reach for the network
+    (setenv "KITTYMAX_PACKAGES" "none")
     (setenv "XDG_DATA_HOME" (expand-file-name "data" home))
     (setenv "XDG_CACHE_HOME" (expand-file-name "cache" home))
     (setq user-emacs-directory (file-name-as-directory kitty-test--root))

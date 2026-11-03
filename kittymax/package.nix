@@ -131,6 +131,7 @@ pkgs.symlinkJoin {
       --run 'if [ ! -f "$kittymax_dir/init.el" ]; then echo "kittymax: no init.el in $kittymax_dir (the ~/.config/kittymax symlink from home.nix is missing: rebuild, or set KITTYMAX_DIR)" >&2; exit 1; fi' \
       --add-flags '--init-directory "$kittymax_dir"' \
       --suffix PATH : ${pkgs.lib.makeBinPath tools} \
+      --set KITTYMAX_PACKAGES nix \
       --set-default ENCHANT_PREFIX_DIR ${pkgs.enchant}
   '';
   passthru = {

@@ -12,7 +12,14 @@
 
 (require 'kitty-lib)
 
-(setq dired-listing-switches "-alhv --group-directories-first"
+;; Without GNU ls (native Windows) Emacs lists directories itself, which
+;; understands fewer switches.
+(when (kitty-windows-p)
+  (setq ls-lisp-use-insert-directory-program nil
+        ls-lisp-dirs-first t
+        ls-lisp-ignore-case t))
+
+(setq dired-listing-switches (if (kitty-windows-p) "-alh" "-alhv --group-directories-first")
       dired-dwim-target t
       dired-kill-when-opening-new-dired-buffer t
       dired-recursive-copies 'always

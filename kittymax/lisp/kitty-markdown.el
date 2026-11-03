@@ -152,7 +152,8 @@
   (kitty--markdown-hide-heading-hashes)
   (kitty-markdown-reveal-mode 1)
   (when (display-graphic-p) (markdown-display-inline-images))
-  (if (fboundp 'jinx-mode) (jinx-mode 1) (flyspell-mode 1))
+  (cond ((and (fboundp 'jinx-mode) (not (kitty-windows-p))) (jinx-mode 1))
+        ((executable-find (or (bound-and-true-p ispell-program-name) "aspell")) (flyspell-mode 1)))
   (when (executable-find "marksman") (eglot-ensure)))
 
 (kitty-add-hook 'markdown-mode-hook #'kitty--markdown-setup)
@@ -194,6 +195,19 @@
 
 ;;;; Images from the clipboard
 
+(defun kitty-markdown--save-clipboard-image (file)
+  "Write the image on the clipboard to FILE as PNG; return the exit status (0 = done)."
+  (if (kitty-windows-p)
+      (call-process "powershell" nil nil nil "-NoProfile" "-Command"
+                    (format (concat "Add-Type -AssemblyName System.Windows.Forms;"
+                                    "Add-Type -AssemblyName System.Drawing;"
+                                    "$i=[System.Windows.Forms.Clipboard]::GetImage();"
+                                    "if($i -eq $null){exit 1};"
+                                    "$i.Save('%s',[System.Drawing.Imaging.ImageFormat]::Png)")
+                            (replace-regexp-in-string "'" "''" (convert-standard-filename file))))
+    (call-process-shell-command
+     (format "wl-paste --type image/png > %s" (shell-quote-argument file)))))
+
 (defun kitty-markdown-paste-image ()
   "Save the image on the clipboard next to the document and link it."
   (interactive)
@@ -202,8 +216,7 @@
          (name (format-time-string "paste-%Y%m%d-%H%M%S.png"))
          (file (expand-file-name name dir)))
     (make-directory dir t)
-    (if (zerop (call-process-shell-command
-                (format "wl-paste --type image/png > %s" (shell-quote-argument file))))
+    (if (zerop (kitty-markdown--save-clipboard-image file))
         (progn (insert (format "![](assets/%s)" name))
                (markdown-display-inline-images))
       (ignore-errors (delete-file file))

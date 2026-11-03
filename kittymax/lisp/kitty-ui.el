@@ -40,7 +40,7 @@
 
 (defcustom kitty-font-mono "JetBrainsMono Nerd Font"
   "Fixed pitch font." :type 'string :group 'kittymax)
-(defcustom kitty-font-sans "Inter"
+(defcustom kitty-font-sans (if (kitty-windows-p) "Segoe UI" "Inter")
   "Variable pitch font, used for prose (markdown, org)." :type 'string :group 'kittymax)
 (defcustom kitty-font-size 13
   "Font size in points." :type 'integer :group 'kittymax)

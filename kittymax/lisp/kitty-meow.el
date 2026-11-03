@@ -306,8 +306,8 @@
       (kitty-prefix "open"
         "a" '("agenda" . org-agenda)
         "c" '("capture" . org-capture)
-        "t" '("terminal" . eat)
-        "T" '("terminal here" . eat-project)
+        "t" '("terminal" . kitty-terminal)
+        "T" '("terminal here" . kitty-terminal-here)
         "e" '("eshell" . eshell)
         "d" '("dired" . dired-jump)
         "p" '("sidebar" . dirvish-side)
@@ -393,9 +393,21 @@
     (when (and (buffer-file-name b) (not (eq b (current-buffer))))
       (kill-buffer b))))
 
+(defun kitty-terminal ()
+  "A terminal in Emacs: eat where it works, eshell otherwise (native Windows)."
+  (interactive)
+  (if (and (fboundp 'eat) (not (kitty-windows-p))) (eat) (eshell)))
+
+(defun kitty-terminal-here ()
+  "A terminal at the project root."
+  (interactive)
+  (let ((default-directory (kitty-project-root)))
+    (kitty-terminal)))
+
 (defun kitty-sudo-find-file (file)
   "Open FILE as root through TRAMP."
   (interactive "FFind file as root: ")
+  (when (kitty-windows-p) (user-error "There is no sudo on Windows"))
   (find-file (concat "/sudo:root@localhost:" (expand-file-name file))))
 
 (defun kitty-insert-file-name ()

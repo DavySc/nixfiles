@@ -14,6 +14,7 @@
 
 (require 'subr-x)
 (require 'project)
+(require 'kitty-platform)
 
 (defvar kitty-config-dir)
 (defvar kitty-cache-dir)
