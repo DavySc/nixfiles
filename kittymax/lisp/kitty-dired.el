@@ -39,7 +39,7 @@
       dirvish-quick-access-entries
       '(("h" "~/" "Home")
         ("p" "~/Projects/" "Projects")
-        ("n" "~/nixfiles/" "nixfiles")
+        ("n" "~/nixos-config/" "nixos-config")
         ("c" "~/.config/" "Config")))
 
 (add-hook 'emacs-startup-hook

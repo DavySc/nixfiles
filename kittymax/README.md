@@ -26,7 +26,7 @@ test/                ERT tests (test/run.sh)
 
 ## Install
 
-It is wired into `home.nix` already: `sudo nixos-rebuild switch --flake ~/nixfiles#wsl`,
+It is wired into `home.nix` already: `sudo nixos-rebuild switch --flake ~/nixos-config#wsl`,
 then `kittymax` (a window through WSLg) or `kittymax -nw`.
 
 The Lisp is **not** in the Nix store: `~/.config/kittymax` is a symlink to this

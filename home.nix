@@ -56,7 +56,7 @@ in
   # ~/.config/kittymax: editing it and `SPC h r` needs no rebuild. Packages and
   # tools (kittymax/package.nix) do need one.
   xdg.configFile."kittymax".source =
-    config.lib.file.mkOutOfStoreSymlink "${config.home.homeDirectory}/nixfiles/kittymax";
+    config.lib.file.mkOutOfStoreSymlink "${config.home.homeDirectory}/nixos-config/kittymax";
 
   programs.home-manager.enable = true;
 }
