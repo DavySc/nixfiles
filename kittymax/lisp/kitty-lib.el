@@ -51,17 +51,24 @@
       (error (message "kittymax: compiling %s failed: %s" src err) nil))))
 
 (defun kitty-load (feature)
-  "Load module FEATURE (a symbol) from its compiled copy, building it if needed."
+  "Load module FEATURE (a symbol) from its compiled copy, building it if needed.
+A module that fails is reported in *Warnings* and skipped: the modules after
+it still load, so one bug does not turn the whole editor into stock Emacs."
   (let* ((t0 (float-time))
          (name (symbol-name feature))
          (src (locate-file name load-path '(".el")))
          (dest (and src (expand-file-name (concat name ".elc") (kitty--elc-dir)))))
-    (cond
-     ((null src) (display-warning 'kittymax (format "no module %s" name) :error))
-     ((and (or (not (kitty--stale-p src dest)) (kitty--compile src dest))
-           (file-exists-p dest))
-      (load dest nil 'nomessage 'nosuffix))
-     (t (load src nil 'nomessage 'nosuffix)))
+    (condition-case err
+        (cond
+         ((null src) (display-warning 'kittymax (format "no module %s" name) :error))
+         ((and (or (not (kitty--stale-p src dest)) (kitty--compile src dest))
+               (file-exists-p dest))
+          (load dest nil 'nomessage 'nosuffix))
+         (t (load src nil 'nomessage 'nosuffix)))
+      (error
+       (display-warning 'kittymax
+                        (format "Loading %s failed: %s" name (error-message-string err))
+                        :error)))
     (push (cons feature (- (float-time) t0)) kitty--load-times)
     feature))
 

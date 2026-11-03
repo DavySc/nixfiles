@@ -58,6 +58,7 @@
                 (run-with-idle-timer
                  1 nil
                  (lambda ()
+                   (require 'package)
                    (package-quickstart-refresh)
                    (with-temp-file key-file (insert kitty--package-key))))))))
 
