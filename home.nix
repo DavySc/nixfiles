@@ -34,6 +34,11 @@ in
     nerd-fonts.jetbrains-mono
     nerd-fonts.symbols-only
     inter
+    verible
+    clang-tools
+    glsl_analyzer
+    tmux # Kakoune has no windowing of its own
+    marksman # only if you want to test markdown LSP
   ];
 
   # Make the fonts above visible to Emacs (and everything else) under WSLg.
@@ -50,13 +55,27 @@ in
       email = "dvdschoot@pm.me";
     };
   };
+
+  #  xdg.configFile."kak".source =
+  #   config.lib.file.mkOutOfStoreSymlink "${config.home.homeDirectory}/kak-test";
+  # xdg.configFile."kak-lsp".source =
+  #  config.lib.file.mkOutOfStoreSymlink "${config.home.homeDirectory}/kak-test/lsp";
   xdg.configFile."nvim".source =
     config.lib.file.mkOutOfStoreSymlink "${config.home.homeDirectory}/my-nvim";
+<<<<<<< HEAD
   # kittymax's Lisp lives in this repo (kittymax/) and is read live through
   # ~/.config/kittymax: editing it and `SPC h r` needs no rebuild. Packages and
   # tools (kittymax/package.nix) do need one.
   xdg.configFile."kittymax".source =
     config.lib.file.mkOutOfStoreSymlink "${config.home.homeDirectory}/nixos-config/kittymax";
+=======
+  # Same idea for Kakoune: the config lives in this repo (kak/), read live from
+  # ~/.config/kak, so editing it and <space>R needs no rebuild.
+  xdg.configFile."kak".source =
+    config.lib.file.mkOutOfStoreSymlink "${config.home.homeDirectory}/nixfiles/kak";
+>>>>>>> 7106e36 (bla)
 
+  xdg.configFile."emacs/init.el".source =
+    config.lib.file.mkOutOfStoreSymlink "${config.home.homeDirectory}/emacs-test/init.el";
   programs.home-manager.enable = true;
 }
