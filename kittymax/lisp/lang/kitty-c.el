@@ -17,7 +17,7 @@
       c-default-style '((c-mode . "k&r") (c++-mode . "stroustrup") (other . "gnu")))
 
 (dolist (hook '(c-mode-hook c-ts-mode-hook c++-mode-hook c++-ts-mode-hook))
-  (add-hook hook (lambda () (kitty-eglot-ensure-for "clangd"))))
+  (kitty-add-hook hook (lambda () (kitty-eglot-ensure-for "clangd"))))
 
 ;; clang-format has an opinion even without a style file; only format when
 ;; the project pinned one.
@@ -28,7 +28,7 @@
   (unless (kitty--c-format-on-save-p)
     (when (fboundp 'apheleia-mode) (apheleia-mode -1))))
 (dolist (hook '(c-mode-hook c-ts-mode-hook c++-mode-hook c++-ts-mode-hook))
-  (add-hook hook #'kitty--c-setup))
+  (kitty-add-hook hook #'kitty--c-setup))
 
 ;;;; Build and run
 

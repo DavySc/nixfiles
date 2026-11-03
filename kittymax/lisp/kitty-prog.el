@@ -79,7 +79,7 @@
       flymake-margin-indicators-string
       '((error "●" compilation-error) (warning "●" compilation-warning)
         (note "●" compilation-info)))
-(add-hook 'prog-mode-hook #'flymake-mode)
+(kitty-add-hook 'prog-mode-hook #'flymake-mode)
 (define-key mode-specific-map (kbd "e") '("next error" . flymake-goto-next-error))
 
 ;;;; Formatting
@@ -90,7 +90,7 @@
 (defun kitty--apheleia-on ()
   (unless (derived-mode-p kitty-no-format-on-save-modes)
     (apheleia-mode 1)))
-(add-hook 'prog-mode-hook #'kitty--apheleia-on)
+(kitty-add-hook 'prog-mode-hook #'kitty--apheleia-on)
 
 (with-eval-after-load 'apheleia
   (setf (alist-get 'pgformatter apheleia-formatters) '("pg_format" "-"))
@@ -117,7 +117,7 @@
     "w" '("word" . avy-goto-word-1)
     "l" '("line" . avy-goto-line)))
 
-(add-hook 'emacs-lisp-mode-hook (lambda () (when (fboundp 'puni-mode) (puni-mode 1))))
+(kitty-add-hook 'emacs-lisp-mode-hook (lambda () (when (fboundp 'puni-mode) (puni-mode 1))))
 
 (provide 'kitty-prog)
 ;;; kitty-prog.el ends here

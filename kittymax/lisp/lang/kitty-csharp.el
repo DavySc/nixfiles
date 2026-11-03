@@ -27,8 +27,8 @@
               (when (and (fboundp 'eglot-managed-p) (eglot-managed-p))
                 (ignore-errors (eglot-format-buffer))))
             nil t))
-(add-hook 'csharp-ts-mode-hook #'kitty--csharp-setup)
-(add-hook 'csharp-mode-hook #'kitty--csharp-setup)
+(kitty-add-hook 'csharp-ts-mode-hook #'kitty--csharp-setup)
+(kitty-add-hook 'csharp-mode-hook #'kitty--csharp-setup)
 
 ;;;; dotnet
 

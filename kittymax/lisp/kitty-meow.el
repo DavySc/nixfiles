@@ -119,6 +119,8 @@
    ;; multiple cursors
    '("C" . kitty-mc-mark-next)
    '("M" . kitty-mc-mark-all)
+   ;; ex command line: :q :w :wq :e ...
+   '(":" . kitty-ex)
    '("<escape>" . kitty-escape)))
 
 (defun kitty-escape ()
@@ -150,7 +152,7 @@
 (defun kitty-reload ()
   "Reload the configuration, recompiling what changed."
   (interactive)
-  (dolist (m '(kitty-core kitty-ui kitty-meow kitty-mc kitty-completion kitty-vc
+  (dolist (m '(kitty-core kitty-ui kitty-meow kitty-mc kitty-ex kitty-completion kitty-vc
                kitty-dired kitty-org kitty-markdown kitty-prog kitty-c
                kitty-csharp kitty-sql kitty-verilog kitty-nix))
     (kitty-load m))

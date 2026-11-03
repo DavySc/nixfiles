@@ -8,6 +8,7 @@
 ;;   kitty-ui          catppuccin mocha, modeline, fonts, icons, which-key
 ;;   kitty-meow        modal editing and the SPC leader tree
 ;;   kitty-mc          multiple cursors on top of meow's beacon
+;;   kitty-ex          the : command line (:q :w :wq :e :%s ...)
 ;;   kitty-completion  vertico, orderless, consult, embark, corfu
 ;;   kitty-vc          magit, diff-hl
 ;;   kitty-dired       dirvish
@@ -24,6 +25,7 @@
 (kitty-load 'kitty-ui)
 (kitty-load 'kitty-meow)
 (kitty-load 'kitty-mc)
+(kitty-load 'kitty-ex)
 (kitty-load 'kitty-completion)
 (kitty-load 'kitty-vc)
 (kitty-load 'kitty-dired)

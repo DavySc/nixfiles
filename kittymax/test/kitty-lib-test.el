@@ -89,6 +89,26 @@
       (kitty-load 'kitty-test-raises))
     (should (seq-find (lambda (w) (string-match-p "boom" w)) warnings))))
 
+(defvar kitty-test-hook nil)
+
+(ert-deftest kitty-add-hook-contains-errors-and-keeps-going ()
+  (setq kitty-test-hook nil)
+  (let ((ran nil) (warnings nil))
+    (kitty-add-hook 'kitty-test-hook (lambda () (error "nope")))
+    (kitty-add-hook 'kitty-test-hook (lambda () (setq ran t)))
+    (cl-letf (((symbol-function 'display-warning)
+               (lambda (_type message &rest _) (push message warnings))))
+      (run-hooks 'kitty-test-hook))
+    (should ran)
+    (should (seq-find (lambda (w) (string-match-p "nope" w)) warnings))))
+
+(ert-deftest kitty-add-hook-does-not-stack-on-reload ()
+  (setq kitty-test-hook nil)
+  (defun kitty-test-hook-fn () nil)
+  (kitty-add-hook 'kitty-test-hook #'kitty-test-hook-fn)
+  (kitty-add-hook 'kitty-test-hook #'kitty-test-hook-fn)
+  (should (= 1 (length kitty-test-hook))))
+
 (ert-deftest kitty-project-root-falls-back-to-default-directory ()
   (let ((default-directory (file-name-as-directory (make-temp-file "plain" t))))
     (should (equal default-directory (kitty-project-root)))))

@@ -9,7 +9,7 @@
 (require 'kitty-lib)
 
 (add-to-list 'auto-mode-alist '("\\.nix\\'" . nix-ts-mode))
-(add-hook 'nix-ts-mode-hook (lambda () (kitty-eglot-ensure-for "nil")))
+(kitty-add-hook 'nix-ts-mode-hook (lambda () (kitty-eglot-ensure-for "nil")))
 
 (kitty-local-leader 'nix-ts-mode
   "f" '("format" . kitty-format)

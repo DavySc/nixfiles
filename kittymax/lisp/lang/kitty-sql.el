@@ -32,12 +32,12 @@
   (setq-local tab-width 2
               indent-tabs-mode nil
               completion-ignore-case t))
-(add-hook 'sql-mode-hook #'kitty--sql-setup)
+(kitty-add-hook 'sql-mode-hook #'kitty--sql-setup)
 
 (defun kitty--sql-repl-setup ()
   (toggle-truncate-lines 1)
   (setq-local comint-scroll-to-bottom-on-output t))
-(add-hook 'sql-interactive-mode-hook #'kitty--sql-repl-setup)
+(kitty-add-hook 'sql-interactive-mode-hook #'kitty--sql-repl-setup)
 
 (with-eval-after-load 'sql-indent
   (setq sqlind-basic-offset 4))

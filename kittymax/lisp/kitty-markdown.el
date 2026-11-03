@@ -155,8 +155,8 @@
   (if (fboundp 'jinx-mode) (jinx-mode 1) (flyspell-mode 1))
   (when (executable-find "marksman") (eglot-ensure)))
 
-(add-hook 'markdown-mode-hook #'kitty--markdown-setup)
-(add-hook 'gfm-mode-hook #'kitty--markdown-setup)
+(kitty-add-hook 'markdown-mode-hook #'kitty--markdown-setup)
+(kitty-add-hook 'gfm-mode-hook #'kitty--markdown-setup)
 
 ;; The language server comes from kitty-prog (eglot); this tells it about us.
 (with-eval-after-load 'eglot

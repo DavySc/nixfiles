@@ -23,8 +23,8 @@
       dired-mouse-drag-files t
       delete-by-moving-to-trash nil)
 
-(add-hook 'dired-mode-hook #'dired-hide-details-mode)
-(add-hook 'dired-mode-hook #'diredfl-mode)
+(kitty-add-hook 'dired-mode-hook #'dired-hide-details-mode)
+(kitty-add-hook 'dired-mode-hook #'diredfl-mode)
 
 ;;;; dirvish
 

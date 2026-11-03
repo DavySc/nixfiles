@@ -126,7 +126,7 @@
 (setq yas-snippet-dirs (list (expand-file-name "snippets" kitty-config-dir))
       yas-verbosity 0)
 (dolist (hook '(prog-mode-hook text-mode-hook))
-  (add-hook hook #'yas-minor-mode-on))
+  (kitty-add-hook hook #'yas-minor-mode-on))
 
 ;;;; Undo
 

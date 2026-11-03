@@ -124,10 +124,10 @@
 (setq display-line-numbers-type 'relative
       display-line-numbers-width-start t)
 (dolist (hook '(prog-mode-hook conf-mode-hook))
-  (add-hook hook #'display-line-numbers-mode))
+  (kitty-add-hook hook #'display-line-numbers-mode))
 
 ;; Whitespace: show trailing space in code, strip it on save.
-(add-hook 'prog-mode-hook (lambda () (setq-local show-trailing-whitespace t)))
+(kitty-add-hook 'prog-mode-hook (lambda () (setq-local show-trailing-whitespace t)))
 (add-hook 'before-save-hook #'delete-trailing-whitespace)
 
 ;; Compilation output and the like should not need a keyboard shortcut to scroll.

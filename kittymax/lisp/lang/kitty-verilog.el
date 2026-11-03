@@ -97,7 +97,7 @@
   (kitty-eglot-ensure-for "verible-verilog-ls")
   (setq-local indent-tabs-mode nil
               fill-column 100))
-(add-hook 'verilog-mode-hook #'kitty--verilog-setup)
+(kitty-add-hook 'verilog-mode-hook #'kitty--verilog-setup)
 
 ;;;; Lint, simulate, look at waves
 

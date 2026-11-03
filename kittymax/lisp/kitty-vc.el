@@ -22,7 +22,7 @@
       git-commit-style-convention-checks '(non-empty-second-line overlong-summary-line))
 
 ;; Commit messages: spell check and fill like prose.
-(add-hook 'git-commit-mode-hook (lambda () (setq-local fill-column 72)))
+(kitty-add-hook 'git-commit-mode-hook (lambda () (setq-local fill-column 72)))
 
 ;;;; diff-hl: changes in the fringe, stage/revert hunks
 
@@ -38,7 +38,7 @@
     (unless (display-graphic-p) (diff-hl-margin-mode 1))
     (add-hook 'magit-pre-refresh-hook #'diff-hl-magit-pre-refresh)
     (add-hook 'magit-post-refresh-hook #'diff-hl-magit-post-refresh)
-    (add-hook 'dired-mode-hook #'diff-hl-dired-mode)))
+    (kitty-add-hook 'dired-mode-hook #'diff-hl-dired-mode)))
 (add-hook 'emacs-startup-hook #'kitty--diff-hl)
 
 (provide 'kitty-vc)

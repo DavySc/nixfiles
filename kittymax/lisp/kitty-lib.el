@@ -81,6 +81,38 @@ it still load, so one bug does not turn the whole editor into stock Emacs."
            (mapconcat (lambda (m) (format "%s %.0fms" (car m) (* 1000 (cdr m))))
                       (reverse kitty--load-times) ", ")))
 
+;;;; Hooks that cannot take the editor down
+
+;; Emacs stops running a mode's hooks at the first error, and switches
+;; font-lock on only after they have all run: one failing function in
+;; `prog-mode-hook' therefore costs syntax highlighting in every code buffer,
+;; and nothing says why.  `kitty-add-hook' adds a function so that an error
+;; in it is shown in *Warnings* and the hooks after it still run.
+
+(defun kitty--safe-hook-function (fn)
+  "A symbol naming a wrapper of FN that reports its errors instead of raising them."
+  (let ((name (intern (format "kitty-safe/%s"
+                              (if (symbolp fn) fn (md5 (prin1-to-string fn)))))))
+    (unless (fboundp name)
+      (defalias name
+        (lambda (&rest args)
+          (condition-case err
+              (apply fn args)
+            (error
+             (display-warning
+              'kittymax
+              (format "%s failed in %s: %s"
+                      (if (symbolp fn) fn "a hook function")
+                      (or (bound-and-true-p major-mode) "this buffer")
+                      (error-message-string err))
+              :error)
+             nil)))))
+    name))
+
+(defun kitty-add-hook (hook function &optional depth local)
+  "Like `add-hook', but an error in FUNCTION is reported, not raised."
+  (add-hook hook (kitty--safe-hook-function function) depth local))
+
 ;;;; Keymaps for the leader tree
 
 (defun kitty-keymap (&rest bindings)

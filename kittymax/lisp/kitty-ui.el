@@ -108,11 +108,11 @@
 (setq blink-cursor-blinks 3)
 
 (when (require 'rainbow-delimiters nil t)
-  (add-hook 'prog-mode-hook #'rainbow-delimiters-mode))
+  (kitty-add-hook 'prog-mode-hook #'rainbow-delimiters-mode))
 
 (when (require 'hl-todo nil t)
-  (add-hook 'prog-mode-hook #'hl-todo-mode)
-  (add-hook 'text-mode-hook #'hl-todo-mode))
+  (kitty-add-hook 'prog-mode-hook #'hl-todo-mode)
+  (kitty-add-hook 'text-mode-hook #'hl-todo-mode))
 
 ;; Dim the window you are not in a little.
 (setq window-divider-default-right-width 1

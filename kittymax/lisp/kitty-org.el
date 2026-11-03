@@ -102,7 +102,7 @@
   (when (fboundp 'toc-org-mode) (toc-org-mode 1))
   (setq-local line-spacing 0.2)
   (electric-indent-local-mode -1))        ; org indents itself
-(add-hook 'org-mode-hook #'kitty--org-setup)
+(kitty-add-hook 'org-mode-hook #'kitty--org-setup)
 
 (setq org-appear-autoemphasis t
       org-appear-autolinks t

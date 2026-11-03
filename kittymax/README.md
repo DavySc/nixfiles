@@ -13,6 +13,7 @@ lisp/kitty-core      defaults, performance, state directories
 lisp/kitty-ui        catppuccin mocha, doom-modeline, fonts, icons, which-key, splash
 lisp/kitty-meow      modal editing and the SPC leader tree
 lisp/kitty-mc        multiple cursors on meow's beacon
+lisp/kitty-ex        the : command line (:q :w :wq :e :%s ...)
 lisp/kitty-completion vertico orderless marginalia consult embark corfu cape
 lisp/kitty-vc        magit, diff-hl
 lisp/kitty-dired     dired + dirvish
@@ -64,6 +65,23 @@ Things after `,` / `.`: `r` round, `s` square, `c` curly, `a` angle, `g` string,
 
 `SPC m` changes with the mode (org, markdown, C, C#, SQL, Verilog ...): look at
 it with which-key whenever you are in one.
+
+## The `:` command line
+
+`:` in the normal state is a small vi-style command line.
+
+| | |
+| --- | --- |
+| `:q` `:qa` | exit Emacs (asks about unsaved buffers); `:q!` exits without asking |
+| `:w` `:w file` `:wa` | save, save as, save everything |
+| `:wq` `:x` | save this buffer and exit |
+| `:e file` `:e!` | open a file, revert the buffer |
+| `:bd` `:bn` `:bp` | kill, next, previous buffer |
+| `:sp` `:vs` `:only` `:close` | split below / right, keep only this window, close it |
+| `:42` | go to line 42 |
+| `:%s/a/b/g` `:s/a/b/` | substitute in the buffer / on this line or region (Emacs regexps) |
+
+Anything else is tried as an Emacs command name, so `:magit-status` works.
 
 ## Multiple cursors
 
@@ -124,6 +142,13 @@ C# needs the .NET SDK: kittymax carries one, a project's dev shell wins.
   process read size, emacs-lsp-booster for JSON, no events buffer, so-long.
 
 `SPC h s` prints what startup cost, module by module.
+
+## When something breaks
+
+A module that fails to load, or a hook function that raises an error, is
+reported in `*Warnings*` (`C-h e` shows `*Messages*`) and the rest keeps
+working. Emacs itself would stop at the first error: one failing function in a
+mode hook switches off syntax highlighting for every buffer of that mode.
 
 ## Tests
 
