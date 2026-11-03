@@ -124,8 +124,12 @@ pkgs.symlinkJoin {
   nativeBuildInputs = [ pkgs.makeWrapper ];
   postBuild = ''
     # `kittymax [args]`: our config, not ~/.emacs.d. A terminal client: `kittymax -nw`.
+    # Emacs silently falls back to its defaults when the init directory is
+    # missing, so check for it and say so instead.  KITTYMAX_DIR overrides.
     makeWrapper ${emacsWithPackages}/bin/emacs $out/bin/kittymax \
-      --add-flags "--init-directory ${configDir}" \
+      --run 'kittymax_dir="''${KITTYMAX_DIR:-${configDir}}"' \
+      --run 'if [ ! -f "$kittymax_dir/init.el" ]; then echo "kittymax: no init.el in $kittymax_dir (the ~/.config/kittymax symlink from home.nix is missing: rebuild, or set KITTYMAX_DIR)" >&2; exit 1; fi' \
+      --add-flags '--init-directory "$kittymax_dir"' \
       --suffix PATH : ${pkgs.lib.makeBinPath tools} \
       --set-default ENCHANT_PREFIX_DIR ${pkgs.enchant}
   '';
