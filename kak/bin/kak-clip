@@ -1,0 +1,36 @@
+#!/bin/sh
+# kak-clip copy|paste: the system clipboard through whatever this machine has.
+# Wayland (also WSLg) first, then X11, then WSL without WSLg, then macOS.
+# `copy` reads stdin; `paste` writes the clipboard to stdout.
+
+case ${1:-} in
+copy)
+    if [ -n "${WAYLAND_DISPLAY:-}" ] && command -v wl-copy >/dev/null 2>&1; then
+        exec wl-copy
+    elif [ -n "${DISPLAY:-}" ] && command -v xclip >/dev/null 2>&1; then
+        exec xclip -selection clipboard -in
+    elif command -v clip.exe >/dev/null 2>&1; then
+        exec clip.exe # code page of the console: non-ASCII text may come out wrong
+    elif command -v pbcopy >/dev/null 2>&1; then
+        exec pbcopy
+    fi
+    ;;
+paste)
+    if [ -n "${WAYLAND_DISPLAY:-}" ] && command -v wl-paste >/dev/null 2>&1; then
+        exec wl-paste --no-newline
+    elif [ -n "${DISPLAY:-}" ] && command -v xclip >/dev/null 2>&1; then
+        exec xclip -selection clipboard -out
+    elif command -v powershell.exe >/dev/null 2>&1; then
+        powershell.exe -NoProfile -Command Get-Clipboard | tr -d '\r'
+        exit 0
+    elif command -v pbpaste >/dev/null 2>&1; then
+        exec pbpaste
+    fi
+    ;;
+*)
+    echo "usage: kak-clip copy|paste" >&2
+    exit 2
+    ;;
+esac
+echo "kak-clip: no clipboard tool found" >&2
+exit 1

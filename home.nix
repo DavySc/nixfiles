@@ -74,9 +74,9 @@ in
   };
   xdg.configFile."nvim".source =
     config.lib.file.mkOutOfStoreSymlink "${config.home.homeDirectory}/my-nvim";
-  # Same idea for Kakoune: the config is a checkout at ~/my-kak, read live from
+  # Same idea for Kakoune: the config lives in this repo (kak/), read live from
   # ~/.config/kak, so editing it and <space>R needs no rebuild.
-  xdg.configFile."kak".source = config.lib.file.mkOutOfStoreSymlink "${config.home.homeDirectory}/my-kak";
+  xdg.configFile."kak".source = config.lib.file.mkOutOfStoreSymlink "${config.home.homeDirectory}/nixfiles/kak";
 
   programs.home-manager.enable = true;
 }

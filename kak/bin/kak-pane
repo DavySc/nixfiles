@@ -1,0 +1,153 @@
+#!/bin/sh
+# kak-pane: run things next to Kakoune, which has no terminal or popup of its own.
+#
+#   kak-pane popup SESSION CLIENT CWD CMD [ARG...]   lazygit, a shell: a tmux popup, gone when it exits
+#   kak-pane split SESSION CLIENT CWD CMD [ARG...]   build / run output: a pane below, held until Enter
+#   kak-pane side  SESSION CLIENT CWD CMD [ARG...]   a pane on the right (Claude)
+#   kak-pane pick  SESSION CLIENT CWD MODE [ARG...]  an fzf picker; the choice goes back to Kakoune
+#
+# Inside tmux (TMUX set) it uses tmux directly. Anywhere else it asks Kakoune
+# for a `terminal` (Kakoune's windowing: zellij, kitty, sway, Hyprland, X11 ...).
+# Called from lib/core/pane.kak, which passes TMUX / TMUX_PANE of the client.
+
+set -u
+
+# Quote for Kakoune ('' inside single quotes) and for POSIX sh.
+kq() { printf "'%s'" "$(printf %s "$1" | sed "s/'/''/g")"; }
+shq() { printf "'%s'" "$(printf %s "$1" | sed "s/'/'\\\\''/g")"; }
+
+# Run one command in the Kakoune client that asked. -verbatim: the words are
+# the command and its arguments as given, not text to be parsed again.
+send() { # session client word...
+    s=$1 c=$2
+    shift 2
+    printf 'evaluate-commands -client %s -verbatim -- %s\n' "$(kq "$c")" "$*" | kak -p "$s"
+}
+
+# "cmd arg ..." as one shell-quoted string, for tmux's shell-command.
+cmdline() {
+    out=
+    for a in "$@"; do out="$out $(shq "$a")"; done
+    printf %s "$out"
+}
+
+# Pause after the command so its output can be read.
+hold() {
+    cmdline sh -c '"$@"; s=$?; printf "\n[exit %s] press Enter to close " "$s"; read -r _' sh "$@"
+}
+
+open() { # mode session client cwd cmd...
+    mode=$1 session=$2 client=$3 cwd=$4
+    shift 4
+    if [ -n "${TMUX:-}" ] && command -v tmux >/dev/null 2>&1; then
+        target=${TMUX_PANE:+-t $TMUX_PANE}
+        case $mode in
+        popup) tmux display-popup -E -w 90% -h 90% -d "$cwd" $target -- "$(cmdline "$@")" ;;
+        split) tmux split-window -v -l 35% -c "$cwd" $target -- "$(hold "$@")" ;;
+        side) tmux split-window -h -l 38% -c "$cwd" $target -- "$(cmdline "$@")" ;;
+        esac
+        return
+    fi
+    # No tmux: let Kakoune open a terminal. A picker's own terminal is closed by
+    # its exit, so only builds and runs are held.
+    words=
+    if [ "$mode" = split ]; then
+        set -- sh -c "$(printf '%s' 'cd "$0" && "$@"; s=$?; printf "\n[exit %s] press Enter to close " "$s"; read -r _')" "$cwd" "$@"
+    else
+        set -- sh -c 'cd "$0" && exec "$@"' "$cwd" "$@"
+    fi
+    for a in "$@"; do words="$words $(kq "$a")"; done
+    send "$session" "$client" "terminal$words"
+}
+
+files_list() {
+    if command -v fd >/dev/null 2>&1; then
+        fd --type f --hidden --exclude .git
+    elif command -v rg >/dev/null 2>&1; then
+        rg --files --hidden -g '!.git'
+    elif git rev-parse --git-dir >/dev/null 2>&1; then
+        git ls-files
+    else
+        find . -type f -not -path '*/.git/*' | sed 's|^\./||'
+    fi
+}
+
+preview_cmd() {
+    if command -v bat >/dev/null 2>&1; then
+        printf '%s' "bat --color=always --style=numbers --line-range=:300 $1"
+    else
+        printf '%s' "head -300 $1"
+    fi
+}
+
+# The picker proper: runs inside the popup / terminal.
+pick_run() { # session client cwd mode [arg]
+    session=$1 client=$2 cwd=$3 mode=$4
+    shift 4
+    cd "$cwd" || exit 1
+    case $mode in
+    files)
+        sel=$(files_list | fzf --multi --prompt='files> ' --preview "$(preview_cmd '{}')") || exit 0
+        printf '%s\n' "$sel" | while IFS= read -r f; do
+            send "$session" "$client" "edit -existing -- $(kq "$f")"
+        done
+        ;;
+    grep)
+        rg="rg --column --line-number --no-heading --color=always --smart-case --hidden -g '!.git'"
+        sel=$(fzf --ansi --disabled --prompt='grep> ' --query "${1:-}" --delimiter : \
+            --bind "change:reload:sleep 0.1; $rg -- {q} || true" \
+            --preview "$(preview_cmd '{1}') --highlight-line {2}" \
+            --preview-window '+{2}-/2' </dev/null) || exit 0
+        file=${sel%%:*}
+        rest=${sel#*:}
+        line=${rest%%:*}
+        rest=${rest#*:}
+        col=${rest%%:*}
+        send "$session" "$client" "edit -existing -- $(kq "$file") $line $col"
+        ;;
+    buffers) # $1: file with one buffer name per line
+        sel=$(fzf --prompt='buffers> ' <"$1") || exit 0
+        rm -f "$1"
+        send "$session" "$client" "buffer -- $(kq "$sel")"
+        ;;
+    branches)
+        sel=$(git branch --format='%(refname:short)' | fzf --prompt='branch> ') || exit 0
+        if out=$(git checkout "$sel" 2>&1); then
+            send "$session" "$client" "echo -markup $(kq "{Information}$out")"
+        else
+            send "$session" "$client" "echo -markup $(kq "{Error}$out")"
+        fi
+        ;;
+    explore) # yazi when installed, the file picker otherwise
+        if command -v yazi >/dev/null 2>&1; then
+            tmp=$(mktemp)
+            yazi --chooser-file="$tmp" "$cwd"
+            sel=$(cat "$tmp")
+            rm -f "$tmp"
+            [ -n "$sel" ] && send "$session" "$client" "edit -existing -- $(kq "$sel")"
+        else
+            pick_run "$session" "$client" "$cwd" files
+        fi
+        ;;
+    *)
+        echo "kak-pane: unknown picker $mode" >&2
+        exit 1
+        ;;
+    esac
+}
+
+cmd=${1:-}
+shift || true
+case $cmd in
+popup | split | side) open "$cmd" "$@" ;;
+pick)
+    session=$1 client=$2 cwd=$3
+    shift 3
+    open popup "$session" "$client" "$cwd" "$0" _pick "$session" "$client" "$cwd" "$@"
+    ;;
+_pick) pick_run "$@" ;;
+*)
+    echo "usage: kak-pane popup|split|side|pick SESSION CLIENT CWD ..." >&2
+    exit 1
+    ;;
+esac

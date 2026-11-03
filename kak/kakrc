@@ -1,0 +1,59 @@
+# my-kak: one Kakoune config for every machine, mirroring my-nvim.
+#
+#   kakrc                 this file: picks the modules, then loads them
+#   lib/core/*.kak        options, ui, keys, clipboard, panes + pickers, git, lsp, format, ai
+#   lib/lang/<name>.kak   one per language
+#   local.kak             git-ignored, per machine (see local.example.kak)
+#   bin/                  small shell helpers (clipboard, panes, pickers)
+#
+# <space> is the leader, as in nvim; `config-reload` (<space>R) sources this file again.
+
+evaluate-commands %sh{
+    printf "declare-option -docstring 'directory this config is loaded from' str config_dir '%s'\n" \
+        "$(dirname "$kak_source")"
+}
+
+# What a machine may change (local.kak): the languages, whether the background
+# is transparent. Everything else is plain `set-option` in local.kak.
+declare-option -docstring 'languages to set up: lib/lang/<name>.kak' \
+    str-list langs c verilog glsl rust nix lua markdown
+declare-option -docstring 'let the terminal show through (no background colour)' \
+    bool transparent true
+
+# A reload must not stack hooks or highlighters.
+remove-hooks global config
+
+define-command -override -hidden config-source -params 1 %{
+    source "%opt{config_dir}/%arg{1}.kak"
+}
+
+evaluate-commands %sh{
+    if [ -f "$kak_opt_config_dir/local.kak" ]; then
+        printf "source '%s/local.kak'\n" "$kak_opt_config_dir"
+    fi
+}
+
+config-source lib/core/options
+config-source lib/core/ui
+config-source lib/core/keys
+config-source lib/core/clipboard
+config-source lib/core/pane
+config-source lib/core/git
+config-source lib/core/lsp
+config-source lib/core/format
+config-source lib/core/ai
+config-source lib/core/reload
+
+# Languages come after the core: they hook into lsp, format and the <space>m keys.
+evaluate-commands %sh{
+    eval set -- $kak_quoted_opt_langs
+    for lang in "$@"; do
+        if [ -f "$kak_opt_config_dir/lib/lang/$lang.kak" ]; then
+            printf "config-source lib/lang/%s\n" "$lang"
+        else
+            printf "echo -debug 'my-kak: no language module %s'\n" "$lang"
+        fi
+    done
+}
+
+hook -once -group config global ClientCreate .* %{ echo "G'day sir!" }
