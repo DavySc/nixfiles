@@ -6,6 +6,7 @@
 ;;   kitty-lib         loader (byte-compiles into the cache), macros, local leader
 ;;   kitty-core        defaults, performance, state directories
 ;;   kitty-ui          catppuccin mocha, modeline, fonts, icons, which-key
+;;   kitty-splash      the start screen
 ;;   kitty-meow        modal editing and the SPC leader tree
 ;;   kitty-mc          multiple cursors on top of meow's beacon
 ;;   kitty-ex          the : command line (:q :w :wq :e :%s ...)
@@ -23,6 +24,7 @@
 
 (kitty-load 'kitty-core)
 (kitty-load 'kitty-ui)
+(kitty-load 'kitty-splash)
 (kitty-load 'kitty-meow)
 (kitty-load 'kitty-mc)
 (kitty-load 'kitty-ex)

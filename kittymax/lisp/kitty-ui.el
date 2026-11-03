@@ -120,47 +120,5 @@
       window-divider-default-places t)
 (add-hook 'emacs-startup-hook #'window-divider-mode)
 
-;;;; The splash: a cat, the keys that matter, the recent files
-
-(defvar kitty-splash-art
-  "
-      |\\      _,,,---,,_
-ZZZzz /,`.-'`'    -.  ;-;;,_
-     |,4-  ) )-,_. ,\\ (  `'-'
-    '---''(_/--'  `-'\\_)   kittymax
-")
-
-(defun kitty-splash ()
-  "Open the splash buffer."
-  (interactive)
-  (let ((buf (get-buffer-create "*kittymax*")))
-    (with-current-buffer buf
-      (let ((inhibit-read-only t))
-        (erase-buffer)
-        (insert (propertize kitty-splash-art 'face 'font-lock-keyword-face) "\n")
-        (insert (propertize "  SPC SPC" 'face 'bold) "  commands      "
-                (propertize "SPC f f" 'face 'bold) "  find file     "
-                (propertize "SPC p p" 'face 'bold) "  project\n")
-        (insert (propertize "  SPC g g" 'face 'bold) "  magit         "
-                (propertize "SPC o o" 'face 'bold) "  org agenda    "
-                (propertize "SPC h t" 'face 'bold) "  tutorial\n\n")
-        (insert (propertize "  Recent files\n" 'face 'font-lock-comment-face))
-        (require 'recentf)
-        (unless recentf-list (recentf-load-list))
-        (progn
-          (dolist (f (seq-take recentf-list 8))
-            (insert "    ")
-            (insert-text-button (abbreviate-file-name f)
-                                'action (lambda (_) (find-file f))
-                                'follow-link t)
-            (insert "\n"))))
-      (special-mode)
-      (setq-local cursor-type nil
-                  mode-line-format nil)
-      (goto-char (point-min)))
-    (pop-to-buffer-same-window buf)))
-
-(setq initial-buffer-choice #'kitty-splash)
-
 (provide 'kitty-ui)
 ;;; kitty-ui.el ends here

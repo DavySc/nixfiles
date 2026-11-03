@@ -77,6 +77,13 @@
       load-prefer-newer t
       use-dialog-box nil
       use-file-dialog nil)
+;; Start full screen (F11 toggles it).  KITTYMAX_FRAME=maximized keeps the
+;; window decorations, KITTYMAX_FRAME=windowed leaves the size alone.
+(let ((mode (pcase (getenv "KITTYMAX_FRAME")
+              ("windowed" nil)
+              ("maximized" 'maximized)
+              (_ 'fullboth))))
+  (when mode (push (cons 'fullscreen mode) default-frame-alist)))
 (push '(menu-bar-lines . 0) default-frame-alist)
 (push '(tool-bar-lines . 0) default-frame-alist)
 (push '(vertical-scroll-bars) default-frame-alist)

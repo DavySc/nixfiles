@@ -29,7 +29,7 @@
                  (apply orig type message args))))
       (kitty-test--boot))
     (should-not warnings)
-    (dolist (m '(kitty-core kitty-ui kitty-meow kitty-mc kitty-ex kitty-completion kitty-vc
+    (dolist (m '(kitty-core kitty-ui kitty-splash kitty-meow kitty-mc kitty-ex kitty-completion kitty-vc
                  kitty-dired kitty-org kitty-markdown kitty-prog kitty-c kitty-csharp
                  kitty-sql kitty-verilog kitty-nix))
       (should (assq m kitty--load-times))
@@ -38,7 +38,7 @@
 (ert-deftest kitty-smoke-modules-are-byte-compiled-into-the-cache ()
   "A module that silently falls back to source costs startup time on every start."
   (unless (featurep 'kitty-core) (kitty-test--boot))
-  (dolist (m '(kitty-core kitty-ui kitty-meow kitty-mc kitty-ex kitty-completion kitty-vc
+  (dolist (m '(kitty-core kitty-ui kitty-splash kitty-meow kitty-mc kitty-ex kitty-completion kitty-vc
                kitty-dired kitty-org kitty-markdown kitty-prog kitty-c kitty-csharp
                kitty-sql kitty-verilog kitty-nix))
     (should (file-exists-p (expand-file-name (format "elc/%s.elc" m) kitty-cache-dir)))))

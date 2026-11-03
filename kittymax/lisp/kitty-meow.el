@@ -152,7 +152,7 @@
 (defun kitty-reload ()
   "Reload the configuration, recompiling what changed."
   (interactive)
-  (dolist (m '(kitty-core kitty-ui kitty-meow kitty-mc kitty-ex kitty-completion kitty-vc
+  (dolist (m '(kitty-core kitty-ui kitty-splash kitty-meow kitty-mc kitty-ex kitty-completion kitty-vc
                kitty-dired kitty-org kitty-markdown kitty-prog kitty-c
                kitty-csharp kitty-sql kitty-verilog kitty-nix))
     (kitty-load m))
@@ -198,6 +198,7 @@
         "S" '("save all" . save-some-buffers)
         "r" '("revert" . revert-buffer-quick)
         "l" '("list" . ibuffer)
+        "h" '("home" . kitty-splash)
         "x" '("scratch" . scratch-buffer)
         "m" '("messages" . view-echo-area-messages)))
 
