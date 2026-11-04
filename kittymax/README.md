@@ -13,6 +13,7 @@ lisp/kitty-packages  the package list; installs it from ELPA/MELPA without Nix
 lisp/kitty-lib       loader (compiles into the cache), keymap helpers, SPC m
 lisp/kitty-core      defaults, performance, state directories
 lisp/kitty-ui        catppuccin mocha, doom-modeline, fonts, icons, which-key, splash
+lisp/kitty-cat       a kitten gives you a paw when you save
 lisp/kitty-meow      modal editing and the SPC leader tree
 lisp/kitty-mc        multiple cursors on meow's beacon
 lisp/kitty-ex        the : command line (:q :w :wq :e :%s ...)
@@ -114,6 +115,22 @@ Things after `,` / `.`: `r` round, `s` square, `c` curly, `a` angle, `g` string,
 
 `SPC m` changes with the mode (org, markdown, C, C#, SQL, Verilog ...): look at
 it with which-key whenever you are in one.
+
+## When you save
+
+A kitten in the echo area blinks and gives you a paw:
+
+```
+ /\_/\  <3
+( ^.^ )__o
+ > ^ <   saved notes.org
+```
+
+It takes about a second and blocks nothing: any key sends it away, and
+`=^.^= saved notes.org` stays behind. It plays only for the buffer you are
+looking at, never over a minibuffer prompt, and once per save even when a
+formatter saves again. `SPC t k` turns it off (`(kitty-cat-mode -1)` in
+`local.el` to keep it off), and `M-x kitty-cat-paw` calls it whenever you need one.
 
 ## The `:` command line
 

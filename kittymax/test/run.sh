@@ -9,7 +9,7 @@ set -eu
 here=$(cd "$(dirname "$0")/.." && pwd)
 emacs=${KITTYMAX_EMACS:-kittymax}
 status=0
-for t in kitty-lib kitty-platform kitty-smoke kitty-ex kitty-splash kitty-mc kitty-markdown kitty-verilog kitty-sqldiff; do
+for t in kitty-lib kitty-platform kitty-smoke kitty-ex kitty-splash kitty-mc kitty-markdown kitty-verilog kitty-sqldiff kitty-cat; do
     printf '== %s\n' "$t"
     "$emacs" --batch -q -L "$here/lisp" -L "$here/lisp/lang" \
         -l "$here/test/$t-test.el" -f ert-run-tests-batch-and-exit || status=1
