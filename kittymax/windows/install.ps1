@@ -54,3 +54,7 @@ Write-Host ""
 Write-Host "Done. Open a new terminal (so PATH is refreshed), then start kittymax from the" -ForegroundColor Green
 Write-Host "desktop shortcut or with:  $launcher" -ForegroundColor Green
 Write-Host "The first start installs the Emacs packages; give it a few minutes."
+Write-Host ""
+Write-Host "Optional, for SQL: sqldiff (lint and cross-dialect diff) and sqlfluff (T-SQL formatting):"
+Write-Host "  winget install Rustlang.Rustup; cargo install --git https://github.com/DavySc/SQLDiff sqldiff-cli"
+Write-Host "  pip install sqlfluff"

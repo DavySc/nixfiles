@@ -22,7 +22,7 @@ lisp/kitty-dired     dired + dirvish
 lisp/kitty-org       org-mode
 lisp/kitty-markdown  the markdown editing experience
 lisp/kitty-prog      tree-sitter, eglot (+ emacs-lsp-booster), flymake, apheleia
-lisp/lang/           c, csharp, sql, verilog, nix
+lisp/lang/           c, csharp, sql (+ sqldiff), verilog, nix
 package.nix          Emacs with all packages + language servers + tools = `kittymax`
 windows/             kittymax.cmd (launcher) and install.ps1 (winget) for native Windows
 test/                ERT tests (test/run.sh)
@@ -71,7 +71,11 @@ Different on Windows:
 - **Language servers and tools** that winget has no package for: install
   verible, verilator and iverilog (hardware) and sqls (SQL) yourself and put
   them on `PATH`; kittymax uses what it finds. `SPC o s` (psql) needs the
-  PostgreSQL client tools.
+  PostgreSQL client tools. sqldiff: install Rust (`winget install
+  Rustlang.Rustup`) and `cargo install --git https://github.com/DavySc/SQLDiff
+  sqldiff-cli`, which puts `sqldiff.exe` in `%USERPROFILE%\.cargo\bin`.
+  Without it the SQL lint and diff are off; T-SQL formatting wants sqlfluff
+  (`pip install sqlfluff`).
 - `SPC f u` (sudo) does not exist; pasting an image from the clipboard
   (`SPC m i p`) goes through PowerShell; dired uses Emacs's own `ls`.
 - State is under `%LOCALAPPDATA%\kittymax` (`data` kept, `cache` disposable,
@@ -164,7 +168,7 @@ Prettier formats on request only (`SPC c f`), never on save.
 | --- | --- | --- | --- |
 | C / C++ | clangd | clang-format (with a `.clang-format`) | CMake/Ninja or Make, run, ctest, gdb, header/source |
 | C# | csharp-ls | the server, on save | `dotnet` build / run / test / watch, add package |
-| SQL | sqls (`SPC m L`) | pg_format | connect, send paragraph / region / buffer, describe table |
+| SQL | sqls (`SPC m L`), sqldiff (flymake) | by dialect, see below | connect, send, describe table, sqldiff (`D` with file, `k` check), `t` dialect |
 | Verilog, SystemVerilog | verible | verible | verilator lint, iverilog + vvp, gtkwave, AUTOs, templates |
 | Nix | nil | nixfmt | rebuild |
 
@@ -172,6 +176,38 @@ Verilog buffers are also linted by verilator as you type (flymake), for the
 checks a language server does not do: widths, unused and undriven signals.
 
 C# needs the .NET SDK: kittymax carries one, a project's dev shell wins.
+
+### SQL dialects
+
+kittymax works with T-SQL (SQL Server), PostgreSQL and Db2 for i, and never
+guesses which one a file is written in. The dialect comes from, in order:
+
+1. `kitty-sql-dialect`, set in `.dir-locals.el` (`SPC m t` offers to write it)
+   or in the file's first line (`-- -*- kitty-sql-dialect: tsql -*-`):
+
+   ```elisp
+   ((sql-mode . ((kitty-sql-dialect . db2i))))
+   ```
+
+2. the file name: `foo.tsql.sql`, `foo.pg.sql` (or `.pgsql`), `foo.db2i.sql`;
+3. `kitty-sql-default-dialect` from `local.el`, which is nil out of the box.
+
+The mode line shows it (`SQL[tsql]`), and it decides:
+
+| dialect | highlighting | format on save | sqldiff |
+| --- | --- | --- | --- |
+| `postgres` | PostgreSQL | pg_format | yes |
+| `tsql` | SQL Server | sqlfluff | yes |
+| `db2i` | Db2 | none | yes |
+| not known | PostgreSQL | none | off |
+
+[sqldiff](https://github.com/DavySc/SQLDiff) runs as you type (flymake):
+residue from other dialects, a missing `;` before `THROW`, parse problems.
+`SPC m D` compares the file with another one. It offers the same object in
+another dialect (`foo.tsql.sql` next to `foo.db2i.sql`) and shows the verdict
+and every behavioural difference in `*sqldiff*`: `RET` jumps to either side,
+`g` reruns, `e` opens ediff. After `SPC m f` (format), sqldiff compares before
+and after and warns if the formatter changed what the code means.
 
 ## Why it starts fast
 

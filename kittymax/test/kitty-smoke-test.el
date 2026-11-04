@@ -33,7 +33,7 @@
     (should-not warnings)
     (dolist (m '(kitty-core kitty-ui kitty-splash kitty-meow kitty-mc kitty-ex kitty-completion kitty-vc
                  kitty-dired kitty-org kitty-markdown kitty-prog kitty-c kitty-csharp
-                 kitty-sql kitty-verilog kitty-nix))
+                 kitty-sql kitty-sqldiff kitty-verilog kitty-nix))
       (should (assq m kitty--load-times))
       (should (featurep m)))))
 
@@ -42,7 +42,7 @@
   (unless (featurep 'kitty-core) (kitty-test--boot))
   (dolist (m '(kitty-core kitty-ui kitty-splash kitty-meow kitty-mc kitty-ex kitty-completion kitty-vc
                kitty-dired kitty-org kitty-markdown kitty-prog kitty-c kitty-csharp
-               kitty-sql kitty-verilog kitty-nix))
+               kitty-sql kitty-sqldiff kitty-verilog kitty-nix))
     (should (file-exists-p (expand-file-name (format "elc/%s.elc" m) kitty-cache-dir)))))
 
 (ert-deftest kitty-smoke-leader-tree ()
@@ -62,6 +62,8 @@
                    (c++-ts-mode "r" kitty-c-run)
                    (csharp-ts-mode "t" kitty-csharp-test)
                    (sql-mode "e" kitty-sql-send-dwim)
+                   (sql-mode "t" kitty-sql-set-dialect)
+                   (sql-mode "D" kitty-sqldiff-diff)
                    (verilog-mode "l" kitty-verilog-lint)
                    (verilog-mode "i m" verilog-sk-module)
                    (nix-ts-mode "f" kitty-format)))

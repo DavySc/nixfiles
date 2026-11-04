@@ -151,7 +151,28 @@
         "home-manager": "home-manager",
         "neovim-nightly-overlay": "neovim-nightly-overlay",
         "nixos-wsl": "nixos-wsl",
-        "nixpkgs": "nixpkgs_2"
+        "nixpkgs": "nixpkgs_2",
+        "sqldiff": "sqldiff"
+      }
+    },
+    "sqldiff": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1793787087,
+        "narHash": "sha256-UuQiNPWLV9QQojt9FaOR61f21reCrpA38y/Jg0/XNxA=",
+        "owner": "DavySc",
+        "repo": "SQLDiff",
+        "rev": "437373455ee980bd5a16500c5e84abb269065baa",
+        "type": "github"
+      },
+      "original": {
+        "owner": "DavySc",
+        "repo": "SQLDiff",
+        "type": "github"
       }
     }
   },

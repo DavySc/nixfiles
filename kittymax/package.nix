@@ -8,6 +8,9 @@
 {
   pkgs,
   configDir ? "$HOME/.config/kittymax",
+  # sqldiff (github:DavySc/SQLDiff), from the flake input; without it kittymax
+  # builds as before and its sqldiff features stay off.
+  sqldiff ? null,
 }:
 let
   emacsPkg = pkgs.emacs-pgtk; # Wayland/WSLg; native compilation is on by default
@@ -82,41 +85,44 @@ let
   emacsWithPackages = (pkgs.emacsPackagesFor emacsPkg).emacsWithPackages packageList;
 
   # Put at the END of PATH: a project's dev shell (its clangd, its dotnet) wins.
-  tools = with pkgs; [
-    ripgrep
-    fd
-    git
-    delta
-    emacs-lsp-booster # eglot-booster: JSON parsing outside Emacs
-    # C / C++
-    clang-tools # clangd, clang-format
-    gdb
-    cmake
-    ninja
-    # C#: csharp-ls needs a .NET SDK; a project's own (nix develop) comes first on PATH
-    csharp-ls
-    dotnet-sdk
-    # SQL
-    sqls
-    pgformatter
-    sqlfluff
-    postgresql # psql, for sql-postgres
-    # Verilog / SystemVerilog
-    verible
-    verilator
-    iverilog
-    gtkwave
-    # Markdown, org
-    marksman
-    pandoc
-    prettier
-    hunspell
-    hunspellDicts.en_US
-    enchant
-    # Nix
-    nil
-    nixfmt
-  ];
+  tools =
+    with pkgs;
+    [
+      ripgrep
+      fd
+      git
+      delta
+      emacs-lsp-booster # eglot-booster: JSON parsing outside Emacs
+      # C / C++
+      clang-tools # clangd, clang-format
+      gdb
+      cmake
+      ninja
+      # C#: csharp-ls needs a .NET SDK; a project's own (nix develop) comes first on PATH
+      csharp-ls
+      dotnet-sdk
+      # SQL
+      sqls
+      pgformatter
+      sqlfluff
+      postgresql # psql, for sql-postgres
+      # Verilog / SystemVerilog
+      verible
+      verilator
+      iverilog
+      gtkwave
+      # Markdown, org
+      marksman
+      pandoc
+      prettier
+      hunspell
+      hunspellDicts.en_US
+      enchant
+      # Nix
+      nil
+      nixfmt
+    ]
+    ++ lib.optional (sqldiff != null) sqldiff; # SQL: lint, cross-dialect diff
 in
 pkgs.symlinkJoin {
   name = "kittymax-${emacsPkg.version}";

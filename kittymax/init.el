@@ -18,7 +18,7 @@
 ;;   kitty-org         org-mode
 ;;   kitty-markdown    the markdown editing experience
 ;;   kitty-prog        tree-sitter, eglot, formatting
-;;   lang/*            C and C++, C#, SQL, Verilog and SystemVerilog, Nix
+;;   lang/*            C and C++, C#, SQL (+ sqldiff), Verilog and SystemVerilog, Nix
 
 (add-to-list 'load-path (expand-file-name "lisp" kitty-config-dir))
 (add-to-list 'load-path (expand-file-name "lisp/lang" kitty-config-dir))
@@ -40,7 +40,7 @@
 (kitty-load 'kitty-org)
 (kitty-load 'kitty-markdown)
 (kitty-load 'kitty-prog)
-(dolist (lang '(kitty-c kitty-csharp kitty-sql kitty-verilog kitty-nix))
+(dolist (lang '(kitty-c kitty-csharp kitty-sql kitty-sqldiff kitty-verilog kitty-nix))
   (kitty-load lang))
 
 ;; Machine-specific settings (git-ignored): fonts, org directory, work SQL
