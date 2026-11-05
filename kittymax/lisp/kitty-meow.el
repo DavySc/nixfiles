@@ -61,7 +61,8 @@
            (flymake-diagnostics-buffer-mode . motion)
            (flymake-project-diagnostics-mode . motion)
            (ibuffer-mode . motion) (process-menu-mode . motion)
-           (tabulated-list-mode . motion) (markdown-view-mode . motion))
+           (tabulated-list-mode . motion) (markdown-view-mode . motion)
+           (elfeed-search-mode . motion) (elfeed-show-mode . motion))
          meow-mode-state-list)))
 
 ;;;; Keys
@@ -153,7 +154,7 @@
   "Reload the configuration, recompiling what changed."
   (interactive)
   (dolist (m '(kitty-core kitty-ui kitty-splash kitty-meow kitty-mc kitty-ex kitty-completion kitty-vc
-               kitty-dired kitty-org kitty-markdown kitty-prog kitty-c
+               kitty-dired kitty-org kitty-markdown kitty-prog kitty-rss kitty-c
                kitty-csharp kitty-sql kitty-verilog kitty-nix))
     (kitty-load m))
   (message "kittymax reloaded"))
@@ -313,6 +314,8 @@
         "p" '("sidebar" . dirvish-side)
         "f" '("dirvish" . dirvish)
         "s" '("sql" . kitty-sql-connect)
+        "r" '("rss" . kitty-rss)
+        "R" '("rss feeds" . kitty-rss-edit-feeds)
         "m" '("markdown preview" . kitty-markdown-preview)))
 
     (define-key m (kbd "n")

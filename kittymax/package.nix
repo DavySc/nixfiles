@@ -67,6 +67,9 @@ let
       mixed-pitch
       visual-fill-column
       jinx
+      # rss
+      elfeed
+      elfeed-org
       # programming
       treesit-grammars.with-all-grammars
       treesit-auto

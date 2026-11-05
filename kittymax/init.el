@@ -18,6 +18,7 @@
 ;;   kitty-org         org-mode
 ;;   kitty-markdown    the markdown editing experience
 ;;   kitty-prog        tree-sitter, eglot, formatting
+;;   kitty-rss         elfeed: RSS and Atom feeds
 ;;   lang/*            C and C++, C#, SQL, Verilog and SystemVerilog, Nix
 
 (add-to-list 'load-path (expand-file-name "lisp" kitty-config-dir))
@@ -40,6 +41,7 @@
 (kitty-load 'kitty-org)
 (kitty-load 'kitty-markdown)
 (kitty-load 'kitty-prog)
+(kitty-load 'kitty-rss)
 (dolist (lang '(kitty-c kitty-csharp kitty-sql kitty-verilog kitty-nix))
   (kitty-load lang))
 
