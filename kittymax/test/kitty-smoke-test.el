@@ -32,7 +32,7 @@
       (kitty-test--boot))
     (should-not warnings)
     (dolist (m '(kitty-core kitty-ui kitty-splash kitty-cat kitty-meow kitty-mc kitty-ex kitty-completion kitty-vc
-                 kitty-dired kitty-org kitty-markdown kitty-prog kitty-c kitty-csharp
+                 kitty-dired kitty-org kitty-markdown kitty-prog kitty-rss kitty-c kitty-csharp
                  kitty-sql kitty-sqldiff kitty-verilog kitty-nix))
       (should (assq m kitty--load-times))
       (should (featurep m)))))
@@ -41,7 +41,7 @@
   "A module that silently falls back to source costs startup time on every start."
   (unless (featurep 'kitty-core) (kitty-test--boot))
   (dolist (m '(kitty-core kitty-ui kitty-splash kitty-cat kitty-meow kitty-mc kitty-ex kitty-completion kitty-vc
-               kitty-dired kitty-org kitty-markdown kitty-prog kitty-c kitty-csharp
+               kitty-dired kitty-org kitty-markdown kitty-prog kitty-rss kitty-c kitty-csharp
                kitty-sql kitty-sqldiff kitty-verilog kitty-nix))
     (should (file-exists-p (expand-file-name (format "elc/%s.elc" m) kitty-cache-dir)))))
 
@@ -50,7 +50,8 @@
   (dolist (probe '(("f f" . find-file) ("b b" . consult-buffer) ("g g" . magit-status)
                    ("w v" . split-window-right) ("p f" . project-find-file)
                    ("c a" . eglot-code-actions) ("k a" . kitty-mc-mark-all)
-                   ("h t" . meow-tutor) ("t k" . kitty-cat-mode) ("o a" . org-agenda) ("SPC" . execute-extended-command)))
+                   ("h t" . meow-tutor) ("t k" . kitty-cat-mode) ("o a" . org-agenda) ("o r" . kitty-rss)
+                   ("SPC" . execute-extended-command)))
     (let ((b (lookup-key mode-specific-map (kbd (car probe)))))
       (should (eq (cdr probe) (if (consp b) (cdr b) b))))))
 
@@ -66,7 +67,8 @@
                    (sql-mode "D" kitty-sqldiff-diff)
                    (verilog-mode "l" kitty-verilog-lint)
                    (verilog-mode "i m" verilog-sk-module)
-                   (nix-ts-mode "f" kitty-format)))
+                   (nix-ts-mode "f" kitty-format)
+                   (elfeed-search-mode "a" kitty-rss-mark-all-read)))
     (let* ((map (gethash (nth 0 probe) kitty--local-leaders))
            (b (and map (lookup-key map (kbd (nth 1 probe))))))
       (should map)

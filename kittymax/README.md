@@ -23,6 +23,7 @@ lisp/kitty-dired     dired + dirvish
 lisp/kitty-org       org-mode
 lisp/kitty-markdown  the markdown editing experience
 lisp/kitty-prog      tree-sitter, eglot (+ emacs-lsp-booster), flymake, apheleia
+lisp/kitty-rss       elfeed: RSS and Atom feeds
 lisp/lang/           c, csharp, sql (+ sqldiff), verilog, nix
 package.nix          Emacs with all packages + language servers + tools = `kittymax`
 windows/             kittymax.cmd (launcher) and install.ps1 (winget) for native Windows
@@ -178,6 +179,19 @@ Code blocks are highlighted in their language, `SPC m e` edits one in its own
 buffer. marksman completes and checks links and headings, `SPC m p` previews
 live, `SPC m E` exports with pandoc, `SPC m i T` writes a table of contents.
 Prettier formats on request only (`SPC c f`), never on save.
+
+## RSS
+
+`SPC o r` opens elfeed and fetches every feed. The feeds are an org file,
+`elfeed.org` in `org-directory` (elfeed-org), created with a few examples the
+first time; `SPC o R` opens it. One feed link per heading, under a heading
+tagged `:elfeed:`; tags are inherited, so feeds under `** Emacs :emacs:` are
+tagged `emacs`. Set `kitty-rss-feeds-file` in `local.el` to keep it elsewhere.
+
+In the list: `j` `k` move, `RET` reads, `b` opens in the browser, `s` filters
+(`+emacs`, `@1-week-ago`, words), `g` / `G` refresh / fetch, `u` `r` unread /
+read, `q` quits and saves. `SPC m` has mark all read, starring and ready-made
+filters. Entries are shown wrapped and centred like markdown.
 
 ## Languages
 

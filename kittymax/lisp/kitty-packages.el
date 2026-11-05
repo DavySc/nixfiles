@@ -31,6 +31,8 @@
     ;; markdown
     markdown-mode markdown-toc edit-indirect olivetti valign mixed-pitch
     visual-fill-column jinx
+    ;; rss
+    elfeed elfeed-org
     ;; programming
     treesit-auto apheleia eglot-booster verilog-mode sql-indent sqlformat nix-ts-mode eat)
   "Every package the configuration uses (tree-sitter grammars aside).")
