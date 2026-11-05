@@ -162,11 +162,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1793787087,
-        "narHash": "sha256-UuQiNPWLV9QQojt9FaOR61f21reCrpA38y/Jg0/XNxA=",
+        "lastModified": 1793889815,
+        "narHash": "sha256-Kf9PPFkkcHVxBRG2cTv+2wbyz+KvZ8HOmqJTFGAuTyE=",
         "owner": "DavySc",
         "repo": "SQLDiff",
-        "rev": "437373455ee980bd5a16500c5e84abb269065baa",
+        "rev": "84710802c9daa8ed07c692e217fbf7cacf96af66",
         "type": "github"
       },
       "original": {
