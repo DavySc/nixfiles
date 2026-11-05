@@ -97,19 +97,33 @@
 
 (with-eval-after-load 'apheleia
   (setf (alist-get 'pgformatter apheleia-formatters) '("pg_format" "-"))
+  (setf (alist-get 'sqlfluff-tsql apheleia-formatters)
+        '("sqlfluff" "format" "--dialect" "tsql" "--nocolor" "-"))
   (setf (alist-get 'verible-format apheleia-formatters) '("verible-verilog-format" "-"))
-  (setf (alist-get 'sql-mode apheleia-mode-alist) 'pgformatter)
+  ;; SQL has no formatter per mode: kitty-sql picks one per buffer, by dialect.
+  (setf (alist-get 'sql-mode apheleia-mode-alist nil 'remove) nil)
   (setf (alist-get 'verilog-mode apheleia-mode-alist) 'verible-format))
+
+(defvar kitty-after-format-functions nil
+  "Run by `kitty-format' once the buffer is formatted, with the text from before.
+Buffer-local entries let a mode check what the formatter did (kitty-sqldiff).")
 
 (defun kitty-format ()
   "Format the buffer: with its formatter if it has one, else through the language server."
   (interactive)
-  (cond
-   ((and (fboundp 'apheleia--get-formatters)
-         (ignore-errors (apheleia--get-formatters)))
-    (apheleia-format-buffer (apheleia--get-formatters) (lambda () (message "formatted"))))
-   ((and (fboundp 'eglot-managed-p) (eglot-managed-p)) (eglot-format-buffer))
-   (t (indent-region (point-min) (point-max)))))
+  (let* ((buffer (current-buffer))
+         (before (save-restriction (widen) (buffer-substring-no-properties (point-min) (point-max))))
+         (done (lambda ()
+                 (when (buffer-live-p buffer)
+                   (with-current-buffer buffer
+                     (run-hook-with-args 'kitty-after-format-functions before))))))
+    (cond
+     ((and (fboundp 'apheleia--get-formatters)
+           (ignore-errors (apheleia--get-formatters)))
+      (apheleia-format-buffer (apheleia--get-formatters)
+                              (lambda (&rest _) (message "formatted") (funcall done))))
+     ((and (fboundp 'eglot-managed-p) (eglot-managed-p)) (eglot-format-buffer) (funcall done))
+     (t (indent-region (point-min) (point-max)) (funcall done)))))
 
 ;;;; Comments and structure
 

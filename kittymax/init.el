@@ -9,6 +9,7 @@
 ;;   kitty-core        defaults, performance, state directories
 ;;   kitty-ui          catppuccin mocha, modeline, fonts, icons, which-key
 ;;   kitty-splash      the start screen
+;;   kitty-cat         a kitten gives you a paw when you save
 ;;   kitty-meow        modal editing and the SPC leader tree
 ;;   kitty-mc          multiple cursors on top of meow's beacon
 ;;   kitty-ex          the : command line (:q :w :wq :e :%s ...)
@@ -19,7 +20,7 @@
 ;;   kitty-markdown    the markdown editing experience
 ;;   kitty-prog        tree-sitter, eglot, formatting
 ;;   kitty-rss         elfeed: RSS and Atom feeds
-;;   lang/*            C and C++, C#, SQL, Verilog and SystemVerilog, Nix
+;;   lang/*            C and C++, C#, SQL (+ sqldiff), Verilog and SystemVerilog, Nix
 
 (add-to-list 'load-path (expand-file-name "lisp" kitty-config-dir))
 (add-to-list 'load-path (expand-file-name "lisp/lang" kitty-config-dir))
@@ -32,6 +33,7 @@
 (kitty-load 'kitty-core)
 (kitty-load 'kitty-ui)
 (kitty-load 'kitty-splash)
+(kitty-load 'kitty-cat)
 (kitty-load 'kitty-meow)
 (kitty-load 'kitty-mc)
 (kitty-load 'kitty-ex)
@@ -42,7 +44,7 @@
 (kitty-load 'kitty-markdown)
 (kitty-load 'kitty-prog)
 (kitty-load 'kitty-rss)
-(dolist (lang '(kitty-c kitty-csharp kitty-sql kitty-verilog kitty-nix))
+(dolist (lang '(kitty-c kitty-csharp kitty-sql kitty-sqldiff kitty-verilog kitty-nix))
   (kitty-load lang))
 
 ;; Machine-specific settings (git-ignored): fonts, org directory, work SQL

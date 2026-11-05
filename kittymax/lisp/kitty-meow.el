@@ -341,7 +341,8 @@
         "s" '("spell" . kitty-toggle-spell)
         "m" '("hide markup" . kitty-markdown-toggle-markup)
         "r" '("read only" . read-only-mode)
-        "c" '("hl-line" . hl-line-mode)))
+        "c" '("hl-line" . hl-line-mode)
+        "k" '("kitten on save" . kitty-cat-mode)))
 
     (define-key m (kbd "i")
       (kitty-prefix "insert"

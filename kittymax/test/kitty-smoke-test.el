@@ -31,18 +31,18 @@
                  (apply orig type message args))))
       (kitty-test--boot))
     (should-not warnings)
-    (dolist (m '(kitty-core kitty-ui kitty-splash kitty-meow kitty-mc kitty-ex kitty-completion kitty-vc
+    (dolist (m '(kitty-core kitty-ui kitty-splash kitty-cat kitty-meow kitty-mc kitty-ex kitty-completion kitty-vc
                  kitty-dired kitty-org kitty-markdown kitty-prog kitty-rss kitty-c kitty-csharp
-                 kitty-sql kitty-verilog kitty-nix))
+                 kitty-sql kitty-sqldiff kitty-verilog kitty-nix))
       (should (assq m kitty--load-times))
       (should (featurep m)))))
 
 (ert-deftest kitty-smoke-modules-are-byte-compiled-into-the-cache ()
   "A module that silently falls back to source costs startup time on every start."
   (unless (featurep 'kitty-core) (kitty-test--boot))
-  (dolist (m '(kitty-core kitty-ui kitty-splash kitty-meow kitty-mc kitty-ex kitty-completion kitty-vc
+  (dolist (m '(kitty-core kitty-ui kitty-splash kitty-cat kitty-meow kitty-mc kitty-ex kitty-completion kitty-vc
                kitty-dired kitty-org kitty-markdown kitty-prog kitty-rss kitty-c kitty-csharp
-               kitty-sql kitty-verilog kitty-nix))
+               kitty-sql kitty-sqldiff kitty-verilog kitty-nix))
     (should (file-exists-p (expand-file-name (format "elc/%s.elc" m) kitty-cache-dir)))))
 
 (ert-deftest kitty-smoke-leader-tree ()
@@ -50,7 +50,8 @@
   (dolist (probe '(("f f" . find-file) ("b b" . consult-buffer) ("g g" . magit-status)
                    ("w v" . split-window-right) ("p f" . project-find-file)
                    ("c a" . eglot-code-actions) ("k a" . kitty-mc-mark-all)
-                   ("h t" . meow-tutor) ("o a" . org-agenda) ("o r" . kitty-rss) ("SPC" . execute-extended-command)))
+                   ("h t" . meow-tutor) ("t k" . kitty-cat-mode) ("o a" . org-agenda) ("o r" . kitty-rss)
+                   ("SPC" . execute-extended-command)))
     (let ((b (lookup-key mode-specific-map (kbd (car probe)))))
       (should (eq (cdr probe) (if (consp b) (cdr b) b))))))
 
@@ -62,6 +63,8 @@
                    (c++-ts-mode "r" kitty-c-run)
                    (csharp-ts-mode "t" kitty-csharp-test)
                    (sql-mode "e" kitty-sql-send-dwim)
+                   (sql-mode "t" kitty-sql-set-dialect)
+                   (sql-mode "D" kitty-sqldiff-diff)
                    (verilog-mode "l" kitty-verilog-lint)
                    (verilog-mode "i m" verilog-sk-module)
                    (nix-ts-mode "f" kitty-format)

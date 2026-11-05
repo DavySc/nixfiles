@@ -1,4 +1,4 @@
-{ pkgs, ... }:
+{ pkgs, inputs, ... }:
 {
   # WSL integration (provided by the NixOS-WSL module).
   # The default user is "nixos"; the module creates that account, so it is not declared here.
@@ -17,6 +17,7 @@
   home-manager = {
     useGlobalPkgs = true;
     useUserPackages = true;
+    extraSpecialArgs = { inherit inputs; }; # home.nix: the sqldiff flake
     users.nixos = import ./home.nix;
   };
 

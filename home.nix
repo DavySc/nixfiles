@@ -1,8 +1,16 @@
-{ config, pkgs, ... }:
+{
+  config,
+  pkgs,
+  inputs,
+  ...
+}:
 let
   # Emacs: kittymax, with its packages, language servers and tools (kittymax/).
   # The Lisp is read live from this checkout, see xdg.configFile below.
-  kittymax = import ./kittymax/package.nix { inherit pkgs; };
+  kittymax = import ./kittymax/package.nix {
+    inherit pkgs;
+    sqldiff = inputs.sqldiff.packages.${pkgs.stdenv.hostPlatform.system}.default;
+  };
 in
 {
   home.username = "nixos";
