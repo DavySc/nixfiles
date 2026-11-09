@@ -38,6 +38,9 @@ in
     lua-language-server
     stylua
     tree-sitter
+    # Neovim: rendered LaTeX math in org and markdown (snacks.image)
+    tectonic
+    imagemagick
     # kittymax: icons and the prose font
     nerd-fonts.jetbrains-mono
     nerd-fonts.symbols-only
