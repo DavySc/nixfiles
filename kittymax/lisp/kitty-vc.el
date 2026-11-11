@@ -41,5 +41,30 @@
     (kitty-add-hook 'dired-mode-hook #'diff-hl-dired-mode)))
 (add-hook 'emacs-startup-hook #'kitty--diff-hl)
 
+;;;; ih: the changed hunk under the cursor as a text object (gitsigns' select_hunk)
+;;
+;; dih drops a change, yih copies it, vih selects it.  ]h [h and SPC h... are
+;; in kitty-evil.el's leader tree.
+
+(declare-function diff-hl-mark-hunk "diff-hl")
+(defvar evil-inner-text-objects-map)
+(defvar evil-outer-text-objects-map)
+
+(defun kitty-hunk-range ()
+  "The (BEG END) of the diff-hl hunk under the cursor."
+  (unless (require 'diff-hl nil t) (user-error "diff-hl is not installed"))
+  (save-mark-and-excursion
+    (diff-hl-mark-hunk)
+    (list (region-beginning) (region-end))))
+
+(when (require 'evil nil t)
+  (eval '(evil-define-text-object kitty-hunk-object (count &optional beg end type)
+           "The changed hunk under the cursor (gitsigns' ih)."
+           (ignore count beg end type)
+           (kitty-hunk-range))
+        t)
+  (define-key evil-inner-text-objects-map "h" 'kitty-hunk-object)
+  (define-key evil-outer-text-objects-map "h" 'kitty-hunk-object))
+
 (provide 'kitty-vc)
 ;;; kitty-vc.el ends here

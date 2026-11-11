@@ -4,7 +4,7 @@
 
 ;; Catppuccin Mocha everywhere (the theme package also themes org, magit,
 ;; markdown, dired, vertico, corfu ... through the faces they share), a
-;; doom-modeline with meow's state in it, nerd icons, and which-key as the
+;; doom-modeline with evil's state in it, nerd icons, and which-key as the
 ;; discoverability layer for the SPC tree.
 
 ;;; Code:
@@ -87,7 +87,7 @@
 (add-hook 'emacs-startup-hook (lambda () (when (require 'doom-modeline nil t)
                                            (doom-modeline-mode 1))))
 
-;; doom-modeline's `modals' segment shows meow's state (N / I / M / B) itself.
+;; doom-modeline's `modals' segment shows evil's state (N / I / V / M) itself.
 
 ;;;; which-key: the SPC tree, shown after a short wait
 

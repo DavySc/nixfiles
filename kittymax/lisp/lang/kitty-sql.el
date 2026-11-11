@@ -160,5 +160,133 @@ does not lint them.  Set it in local.el, e.g. to `postgres'.")
   "L" '("language server" . kitty-sql-eglot)
   "i" '("show SQLi" . sql-show-sqli-buffer))
 
+;;;; Statements as text objects, as in my-nvim (config/sql_statements.lua)
+;;
+;;   iq / aq   inside / around the statement: yaq copies it, daq deletes it
+;;   ]] / [[   next / previous statement
+;;   gq{motion}  format through the dialect's formatter: gqaq one statement
+;;   K         describe the table under the cursor when connected, else hover
+;;
+;; Statements end at ;, blank lines and T-SQL GO lines, never inside strings or
+;; comments.
+
+(declare-function evil-define-key* "evil-core")
+(defvar apheleia-formatters)
+(defvar evil-lookup-func)
+
+(defconst kitty-sql--boundary "\\(;\\)\\|^[ \t]*\\(?:[Gg][Oo]\\)?[ \t]*$"
+  "A statement boundary: a ; (group 1), a blank line or a GO line.")
+
+(defun kitty-sql--code-p (pos)
+  "Non-nil when POS is code, not inside a string or comment."
+  (save-excursion (not (nth 8 (syntax-ppss pos)))))
+
+(defun kitty-sql-statement-bounds (&optional pos)
+  "(BEG END TERM) of the statement around POS, or nil on a blank line.
+END is before the closing ; or the line ending it; TERM is after the ;
+and the rest of its line, for the `a' object."
+  (save-excursion
+    (goto-char (or pos (point)))
+    (unless (looking-at-p "^[ \t]*$")
+      (let ((case-fold-search nil) beg end term)
+        ;; back to the end of the previous statement
+        (save-excursion
+          (while (and (not beg) (re-search-backward kitty-sql--boundary nil 'move))
+            (when (kitty-sql--code-p (match-beginning 0))
+              (setq beg (if (match-beginning 1) (match-end 1) (min (point-max) (1+ (line-end-position)))))))
+          (setq beg (or beg (point-min))))
+        ;; forward to the end of this one
+        (while (and (not end) (re-search-forward kitty-sql--boundary nil 'move))
+          (when (kitty-sql--code-p (match-beginning 0))
+            (if (match-beginning 1)
+                (setq end (match-beginning 1)
+                      term (save-excursion (goto-char (match-end 1))
+                                           (skip-chars-forward " \t")
+                                           (if (eolp) (min (point-max) (1+ (point))) (point))))
+              (setq end (line-beginning-position)
+                    term end))))
+        (setq end (or end (point-max)) term (or term end))
+        ;; trim the whitespace around it
+        (goto-char beg) (skip-chars-forward " \t\n")
+        (setq beg (point))
+        (goto-char end) (skip-chars-backward " \t\n")
+        (setq end (max beg (point)))
+        (list beg end (max end term))))))
+
+(defun kitty-sql-next-statement (count)
+  "To the start of the COUNTth next statement (my-nvim's ]])."
+  (interactive "p")
+  (dotimes (_ count)
+    (let ((b (kitty-sql-statement-bounds)))
+      (goto-char (if b (nth 2 b) (point)))
+      (skip-chars-forward " \t\n")
+      (when-let* ((next (kitty-sql-statement-bounds))) (goto-char (car next))))))
+
+(defun kitty-sql-previous-statement (count)
+  "To the start of the COUNTth previous statement (my-nvim's [[)."
+  (interactive "p")
+  (dotimes (_ count)
+    (let ((b (kitty-sql-statement-bounds)))
+      (if (and b (< (car b) (point)))
+          (goto-char (car b))
+        (skip-chars-backward " \t\n;")
+        (when (> (point) (point-min)) (backward-char))
+        (when-let* ((prev (kitty-sql-statement-bounds))) (goto-char (car prev)))))))
+
+(defun kitty-sql-format-region (beg end)
+  "Format BEG..END through the buffer's dialect formatter (my-nvim's gq)."
+  (let* ((fmt (kitty-sql-formatter (kitty-sql-dialect)))
+         (cmd (and fmt (boundp 'apheleia-formatters) (alist-get fmt apheleia-formatters))))
+    (unless (and cmd (seq-every-p #'stringp cmd))
+      (user-error "No formatter for %s SQL" (or (kitty-sql-dialect) "this")))
+    (let ((out (generate-new-buffer " *sql-format*")))
+      (unwind-protect
+          (if (zerop (apply #'call-process-region beg end (car cmd) nil out nil (cdr cmd)))
+              (let ((text (with-current-buffer out (string-trim-right (buffer-string)))))
+                (save-excursion
+                  (goto-char beg)
+                  (delete-region beg end)
+                  (insert text)))
+            (user-error "%s: %s" (car cmd) (with-current-buffer out (string-trim (buffer-string)))))
+        (kill-buffer out)))))
+
+(defun kitty-sql-lookup ()
+  "K: describe the table under the cursor when connected, else the server's hover."
+  (interactive)
+  (if (and (boundp 'sql-buffer) (buffer-live-p (get-buffer (or sql-buffer ""))))
+      (sql-list-table (thing-at-point 'symbol t))
+    (kitty-lookup)))
+
+(defun kitty--sql-evil-setup ()
+  (setq-local evil-lookup-func #'kitty-sql-lookup))
+
+(when (require 'evil nil t)
+  (eval '(progn
+           (evil-define-text-object kitty-sql-inner-statement (count &optional beg end type)
+             "Inside the SQL statement, without its ; (my-nvim's iq)."
+             (ignore count beg end type)
+             (let ((b (or (kitty-sql-statement-bounds) (user-error "No statement here"))))
+               (list (nth 0 b) (nth 1 b))))
+           (evil-define-text-object kitty-sql-outer-statement (count &optional beg end type)
+             "The SQL statement with its ; (my-nvim's aq)."
+             (ignore count beg end type)
+             (let ((b (or (kitty-sql-statement-bounds) (user-error "No statement here"))))
+               (list (nth 0 b) (nth 2 b))))
+           (evil-define-operator kitty-sql-gq (beg end)
+             "Format through the dialect's formatter (my-nvim's gq in SQL)."
+             :move-point nil
+             (kitty-sql-format-region beg end)))
+        t)
+  (with-eval-after-load 'sql
+    (evil-define-key* '(visual operator) sql-mode-map
+      (kbd "iq") 'kitty-sql-inner-statement
+      (kbd "aq") 'kitty-sql-outer-statement)
+    (evil-define-key* '(normal visual) sql-mode-map
+      (kbd "gq") 'kitty-sql-gq)
+    (evil-define-key* '(normal motion) sql-mode-map
+      (kbd "]]") #'kitty-sql-next-statement
+      (kbd "[[") #'kitty-sql-previous-statement))
+  (kitty-add-hook 'sql-mode-hook #'kitty--sql-evil-setup))
+
 (provide 'kitty-sql)
 ;;; kitty-sql.el ends here

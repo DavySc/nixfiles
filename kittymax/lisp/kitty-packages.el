@@ -15,7 +15,10 @@
 
 (defconst kitty-packages
   '(;; core, performance
-    meow no-littering gcmh puni avy vundo
+    no-littering gcmh puni avy vundo undo-fu-session
+    ;; Vim keys, as in my-nvim
+    evil evil-collection evil-surround evil-mc evil-args evil-lion
+    evil-textobj-tree-sitter expreg
     ;; ui
     catppuccin-theme doom-modeline nerd-icons nerd-icons-completion nerd-icons-corfu
     nerd-icons-dired rainbow-delimiters hl-todo helpful
@@ -34,7 +37,7 @@
     ;; rss
     elfeed elfeed-org
     ;; programming
-    treesit-auto apheleia eglot-booster verilog-mode sql-indent sqlformat nix-ts-mode eat)
+    treesit-auto apheleia eglot-booster verilog-mode sql-indent sqlformat nix-ts-mode eat dape)
   "Every package the configuration uses (tree-sitter grammars aside).")
 
 (defconst kitty-packages-not-on-windows '(jinx eat eglot-booster)

@@ -178,19 +178,19 @@ A line is a string, or (:button LABEL FILE) for a recent file."
     (push (kitty-splash--rainbow "kittymax" frame) lines)
     (push (propertize
            (if after-init-time
-               (format "meow-powered emacs  ·  started in %.2fs"
+               (format "my-nvim's keys  ·  started in %.2fs"
                        (float-time (time-subtract after-init-time before-init-time)))
-             "meow-powered emacs")
+             "my-nvim's keys")
            'face '(:foreground "#7f849c" :slant italic))
           lines)
     (push "" lines)
     ;; three columns of equal width, so they line up when the block is centred
-    (let* ((cells '(("SPC SPC" "commands") ("SPC ." "find file") ("SPC /" "ripgrep")
-                    ("SPC p p" "project") ("SPC g g" "magit") ("SPC o a" "agenda")
-                    ("SPC h t" "tutorial") (":q" "quit") ("SPC h s" "startup")))
+    ;; my-nvim's dashboard keys (snacks): one key each, pressed on this screen
+    (let* ((cells '(("f" "find file") ("n" "new file") ("g" "find text")
+                    ("r" "recent files") ("c" "config") ("q" "quit")))
            (cw (apply #'max (mapcar (lambda (c) (+ (string-width (car c)) 1 (string-width (cadr c)))) cells))))
       (if (>= width (+ (* 3 cw) 8 2))
-          (dotimes (row 3)
+          (dotimes (row 2)
             (push (mapconcat
                    (lambda (c)
                      (let ((cell (kitty-splash--hint (car c) (cadr c))))
@@ -198,7 +198,7 @@ A line is a string, or (:button LABEL FILE) for a recent file."
                    (seq-subseq cells (* row 3) (* (1+ row) 3)) "    ")
                   lines))
         ;; too narrow for three columns: the essentials, one per line
-        (dolist (i '(0 1 7))
+        (dolist (i '(0 1 5))
           (let ((c (nth i cells)))
             (push (kitty-splash--hint (car c) (cadr c)) lines)))))
     ;; recent files get whatever room is left (a header, a gap, and the margins)
@@ -279,6 +279,37 @@ A line is a string, or (:button LABEL FILE) for a recent file."
   (when (and (null kitty-splash--timer) kitty-splash-animate
              (get-buffer-window (get-buffer kitty-splash-buffer) 'visible))
     (kitty-splash--start-timer)))
+
+;; The keys the start screen shows, as on my-nvim's dashboard.
+(declare-function evil-define-key* "evil-core")
+(declare-function evil-insert-state "evil-states")
+
+(defun kitty-splash-new-file ()
+  "An empty buffer to type in (the dashboard's n)."
+  (interactive)
+  (switch-to-buffer (generate-new-buffer "untitled"))
+  (when (fboundp 'evil-insert-state) (evil-insert-state)))
+
+(defvar kitty-splash-mode-map
+  (let ((map (make-sparse-keymap)))
+    (set-keymap-parent map special-mode-map)
+    (define-key map (kbd "f") #'kitty-find-files)
+    (define-key map (kbd "n") #'kitty-splash-new-file)
+    (define-key map (kbd "g") #'consult-ripgrep)
+    (define-key map (kbd "r") #'consult-recent-file)
+    (define-key map (kbd "c") #'kitty-find-in-config)
+    (define-key map (kbd "q") #'save-buffers-kill-terminal)
+    map)
+  "The start screen's keys.")
+
+(with-eval-after-load 'evil
+  (evil-define-key* '(normal motion) kitty-splash-mode-map
+    (kbd "f") #'kitty-find-files
+    (kbd "n") #'kitty-splash-new-file
+    (kbd "g") #'consult-ripgrep
+    (kbd "r") #'consult-recent-file
+    (kbd "c") #'kitty-find-in-config
+    (kbd "q") #'save-buffers-kill-terminal))
 
 (define-derived-mode kitty-splash-mode special-mode "Splash"
   "Major mode of the start screen."

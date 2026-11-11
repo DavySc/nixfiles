@@ -154,6 +154,69 @@ A DEFINITION may be (\"description\" . command), which which-key shows."
   '(menu-item "+mode" nil :filter (lambda (_) (kitty--local-leader-map)))
   "Bind this to SPC m: it resolves to the keymap of the current mode.")
 
+;;;; The leader: SPC, laid out as in my-nvim
+;;
+;; my-nvim (Neovim) is the source of truth for every key: `kitty-leader-map'
+;; holds its <leader> keys (kitty-evil.el binds SPC to it in normal, visual
+;; and motion states).  A mode can add keys of its own under SPC, as
+;; nvim-orgmode does with <leader>o... in org buffers: `kitty-mode-leader'.
+;; Those prefixes inherit the global ones, so SPC o a still works in org.
+
+(defvar kitty-leader-map (make-sparse-keymap)
+  "The global SPC keys: my-nvim's <leader> tree.")
+
+(defvar kitty--mode-leaders (make-hash-table :test #'eq)
+  "Major mode -> keymap of SPC keys only that mode has.")
+
+(defun kitty--keymap-of (binding)
+  "The keymap in BINDING (a keymap, or a (LABEL . KEYMAP) prefix), or nil."
+  (cond ((keymapp binding) binding)
+        ((and (consp binding) (stringp (car binding)) (keymapp (cdr binding))) (cdr binding))))
+
+(defun kitty-mode-leader (mode &rest bindings)
+  "Add BINDINGS (see `kitty-keymap') under SPC in buffers of major MODE.
+They come before the global leader keys; a prefix they share (SPC o)
+still offers the global keys under it."
+  (let ((map (or (gethash mode kitty--mode-leaders)
+                 (puthash mode (make-sparse-keymap) kitty--mode-leaders))))
+    (while bindings
+      (let* ((keys (kbd (pop bindings)))
+             (def (pop bindings)))
+        ;; Each prefix of KEYS: a keymap inheriting the global one.
+        (dotimes (i (1- (length keys)))
+          (let* ((prefix (substring keys 0 (1+ i)))
+                 (mine (kitty--keymap-of (lookup-key map prefix))))
+            (unless mine
+              (setq mine (make-sparse-keymap))
+              (when-let* ((global (kitty--keymap-of (lookup-key kitty-leader-map prefix))))
+                (set-keymap-parent mine global))
+              (define-key map prefix mine))))
+        (define-key map keys def)))
+    map))
+
+(defun kitty--mode-maps (table)
+  "Keymaps in TABLE for the current major mode and the modes it derives from."
+  (let (maps (mode major-mode))
+    (while mode
+      (when-let* ((m (gethash mode table)))
+        (push m maps))
+      (setq mode (get mode 'derived-mode-parent)))
+    (nreverse maps)))
+
+(defun kitty-leader-keymap ()
+  "The SPC keymap for the current buffer: its mode's own keys over `kitty-leader-map'."
+  (let ((maps (kitty--mode-maps kitty--mode-leaders)))
+    (if maps (make-composed-keymap maps kitty-leader-map) kitty-leader-map)))
+
+(defconst kitty-leader-binding
+  '(menu-item "leader" nil :filter (lambda (_) (kitty-leader-keymap)))
+  "Bind this to SPC: it resolves to the leader keys of the current buffer.")
+
+(defun kitty-leader (&rest bindings)
+  "Add BINDINGS (see `kitty-keymap') to the global leader, `kitty-leader-map'."
+  (while bindings
+    (define-key kitty-leader-map (kbd (pop bindings)) (pop bindings))))
+
 ;;;; Odds and ends
 
 (defmacro kitty-when-executable (program &rest body)

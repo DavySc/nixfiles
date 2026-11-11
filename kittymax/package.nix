@@ -18,7 +18,16 @@ let
   packageList =
     epkgs: with epkgs; [
       # core, performance
-      meow
+      # Vim keys, as in my-nvim (kitty-evil.el, kitty-vim.el)
+      evil
+      evil-collection
+      evil-surround
+      evil-mc
+      evil-args
+      evil-lion
+      evil-textobj-tree-sitter
+      expreg
+      undo-fu-session
       no-littering
       gcmh
       puni
@@ -83,6 +92,7 @@ let
       sqlformat
       nix-ts-mode
       eat
+      dape # debugging, my-nvim's <leader>d
     ];
 
   emacsWithPackages = (pkgs.emacsPackagesFor emacsPkg).emacsWithPackages packageList;
