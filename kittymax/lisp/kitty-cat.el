@@ -16,7 +16,7 @@
 ;;
 ;; It only plays for the buffer you are looking at, not while the minibuffer
 ;; is asking something, and once per save even when a formatter saves again.
-;; SPC t k turns it off (or `(kitty-cat-mode -1)' in local.el);
+;; SPC u k turns it off (or `(kitty-cat-mode -1)' in local.el);
 ;; M-x kitty-cat-paw plays it whenever you need one.
 
 ;;; Code:

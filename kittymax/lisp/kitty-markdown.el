@@ -164,19 +164,29 @@
   (add-to-list 'eglot-server-programs
                '((markdown-mode gfm-mode) . ("marksman" "server"))))
 
-;;;; RET: follow the link under the cursor in the normal state, else continue the list
+;;;; RET and o: lists continue, as in my-nvim (config/markdown_lists.lua)
+
+(declare-function evil-normal-state-p "evil-states")
+(declare-function evil-ret "evil-commands")
+(declare-function evil-insert-state "evil-states")
 
 (defun kitty-markdown-ret ()
-  "In meow's normal state follow a link or toggle a checkbox; elsewhere continue lists."
+  "Typing: a new line that continues the list.  In the normal state: Vim's RET,
+except on a link, which it follows."
   (interactive)
-  (cond
-   ((and (bound-and-true-p meow-normal-mode)
-         (or (markdown-link-at-pos (point)) (markdown-wiki-link-p)
-             (thing-at-point-url-at-point)))
-    (markdown-follow-thing-at-point nil))
-   ((and (bound-and-true-p meow-normal-mode) (kitty--markdown-task-item-p))
-    (markdown-toggle-gfm-checkbox))
-   (t (markdown-enter-key))))
+  (if (and (fboundp 'evil-normal-state-p) (evil-normal-state-p))
+      (if (or (markdown-link-at-pos (point)) (markdown-wiki-link-p) (thing-at-point-url-at-point))
+          (markdown-follow-thing-at-point nil)
+        (call-interactively #'evil-ret))
+    (markdown-enter-key)))
+
+(defun kitty-markdown-open-below ()
+  "Open a line below, continuing the list item it is in (my-nvim's o in markdown)."
+  (interactive)
+  ;; Exactly what RET does at the end of the line: it continues lists.
+  (end-of-line)
+  (evil-insert-state)
+  (markdown-enter-key))
 
 (defun kitty--markdown-task-item-p ()
   "Non-nil when point is on a GFM task list item."
@@ -186,6 +196,10 @@
 
 (with-eval-after-load 'markdown-mode
   (define-key markdown-mode-map (kbd "RET") #'kitty-markdown-ret)
+  (with-eval-after-load 'evil
+    (evil-define-key* 'normal markdown-mode-map
+      (kbd "o") #'kitty-markdown-open-below
+      (kbd "RET") #'kitty-markdown-ret))
   ;; subtree and list movement on the keys Emacs users expect
   (define-key markdown-mode-map (kbd "M-<up>") #'markdown-move-up)
   (define-key markdown-mode-map (kbd "M-<down>") #'markdown-move-down)
@@ -285,6 +299,9 @@
   "r" '("renumber list" . markdown-cleanup-list-numbers)
   "j" '("jump (headings)" . consult-outline)
   "c" '("complete buffer" . markdown-complete-buffer))
+
+;; my-nvim's <leader>ce: edit the code block under the cursor in its own buffer.
+(kitty-mode-leader 'markdown-mode "c e" '("edit code block" . markdown-edit-code-block))
 
 (provide 'kitty-markdown)
 ;;; kitty-markdown.el ends here

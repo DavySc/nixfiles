@@ -92,14 +92,16 @@
   (call-interactively #'gdb))
 
 (dolist (mode '(c-mode c-ts-mode c++-mode c++-ts-mode))
+  ;; my-nvim's <leader>m keys (ftplugin/cpp.lua): mm build, mr run, md debug,
+  ;; mg configure, ma source / header.  The rest are extras on free keys.
   (kitty-local-leader mode
-    "c" '("configure" . kitty-c-configure)
-    "b" '("build" . kitty-c-build)
-    "B" '("compile file" . kitty-c-compile-file)
+    "m" '("build" . kitty-c-build)
     "r" '("run" . kitty-c-run)
-    "t" '("ctest" . kitty-c-test)
     "d" '("debug (gdb)" . kitty-c-debug)
-    "s" '("header / source" . ff-find-other-file)
+    "g" '("configure" . kitty-c-configure)
+    "a" '("source / header" . ff-find-other-file)
+    "B" '("compile this file" . kitty-c-compile-file)
+    "T" '("ctest" . kitty-c-test)
     "f" '("format" . kitty-format)))
 
 (provide 'kitty-c)

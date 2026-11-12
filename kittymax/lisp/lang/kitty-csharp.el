@@ -53,7 +53,7 @@
 
 (dolist (mode '(csharp-mode csharp-ts-mode))
   (kitty-local-leader mode
-    "b" '("build" . kitty-csharp-build)
+    "m" '("build" . kitty-csharp-build)
     "r" '("run" . kitty-csharp-run)
     "t" '("test" . kitty-csharp-test)
     "w" '("watch" . kitty-csharp-watch)

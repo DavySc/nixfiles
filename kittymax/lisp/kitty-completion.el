@@ -112,6 +112,12 @@
     (define-key corfu-map (kbd "<tab>") #'corfu-next)
     (define-key corfu-map (kbd "S-TAB") #'corfu-previous)
     (define-key corfu-map (kbd "<backtab>") #'corfu-previous)
+    ;; Vim's popup keys, as in my-nvim: C-n / C-p pick, C-y accepts, C-e closes
+    ;; (RET only accepts an item you picked: `corfu-preselect' is 'prompt).
+    (define-key corfu-map (kbd "C-n") #'corfu-next)
+    (define-key corfu-map (kbd "C-p") #'corfu-previous)
+    (define-key corfu-map (kbd "C-y") #'corfu-insert)
+    (define-key corfu-map (kbd "C-e") #'corfu-quit)
     (define-key corfu-map (kbd "M-SPC") #'corfu-insert-separator))
   (when (require 'nerd-icons-corfu nil t)
     (add-to-list 'corfu-margin-formatters #'nerd-icons-corfu-formatter)))

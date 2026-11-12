@@ -31,7 +31,7 @@
                  (apply orig type message args))))
       (kitty-test--boot))
     (should-not warnings)
-    (dolist (m '(kitty-core kitty-ui kitty-splash kitty-cat kitty-meow kitty-mc kitty-ex kitty-completion kitty-vc
+    (dolist (m '(kitty-core kitty-ui kitty-splash kitty-cat kitty-evil kitty-vim kitty-completion kitty-vc
                  kitty-dired kitty-org kitty-markdown kitty-prog kitty-rss kitty-c kitty-csharp
                  kitty-sql kitty-sqldiff kitty-verilog kitty-nix))
       (should (assq m kitty--load-times))
@@ -40,32 +40,38 @@
 (ert-deftest kitty-smoke-modules-are-byte-compiled-into-the-cache ()
   "A module that silently falls back to source costs startup time on every start."
   (unless (featurep 'kitty-core) (kitty-test--boot))
-  (dolist (m '(kitty-core kitty-ui kitty-splash kitty-cat kitty-meow kitty-mc kitty-ex kitty-completion kitty-vc
+  (dolist (m '(kitty-core kitty-ui kitty-splash kitty-cat kitty-evil kitty-vim kitty-completion kitty-vc
                kitty-dired kitty-org kitty-markdown kitty-prog kitty-rss kitty-c kitty-csharp
                kitty-sql kitty-sqldiff kitty-verilog kitty-nix))
     (should (file-exists-p (expand-file-name (format "elc/%s.elc" m) kitty-cache-dir)))))
 
 (ert-deftest kitty-smoke-leader-tree ()
-  (unless (featurep 'kitty-meow) (kitty-test--boot))
-  (dolist (probe '(("f f" . find-file) ("b b" . consult-buffer) ("g g" . magit-status)
-                   ("w v" . split-window-right) ("p f" . project-find-file)
-                   ("c a" . eglot-code-actions) ("k a" . kitty-mc-mark-all)
-                   ("h t" . meow-tutor) ("t k" . kitty-cat-mode) ("o a" . org-agenda) ("o r" . kitty-rss)
-                   ("SPC" . execute-extended-command)))
-    (let ((b (lookup-key mode-specific-map (kbd (car probe)))))
+  "A few of my-nvim's <leader> keys, through the whole configuration."
+  (unless (featurep 'kitty-evil) (kitty-test--boot))
+  (dolist (probe '(("f f" . kitty-find-files) ("f g" . consult-ripgrep) ("," . consult-buffer)
+                   ("g g" . magit-status) ("h s" . kitty-hunk-stage) ("x x" . flymake-show-project-diagnostics)
+                   ("c a" . eglot-code-actions) ("r n" . eglot-rename) ("u k" . kitty-cat-mode)
+                   ("o a" . org-agenda) ("p v" . kitty-oil) ("t r" . kitty-rss)
+                   ("SPC x" . kitty-source-file)))
+    (let ((b (lookup-key kitty-leader-map (kbd (car probe)))))
       (should (eq (cdr probe) (if (consp b) (cdr b) b))))))
 
 (ert-deftest kitty-smoke-local-leaders-per-language ()
-  (unless (featurep 'kitty-meow) (kitty-test--boot))
+  "SPC m keys, named as my-nvim's ftplugins name them where it has them."
+  (unless (featurep 'kitty-evil) (kitty-test--boot))
   (dolist (probe '((org-mode "t" org-todo)
                    (markdown-mode "p" kitty-markdown-preview)
-                   (c-ts-mode "b" kitty-c-build)
+                   (c-ts-mode "m" kitty-c-build)
                    (c++-ts-mode "r" kitty-c-run)
-                   (csharp-ts-mode "t" kitty-csharp-test)
+                   (c-ts-mode "d" kitty-c-debug)
+                   (c-ts-mode "a" ff-find-other-file)
+                   (csharp-ts-mode "m" kitty-csharp-build)
                    (sql-mode "e" kitty-sql-send-dwim)
                    (sql-mode "t" kitty-sql-set-dialect)
                    (sql-mode "D" kitty-sqldiff-diff)
-                   (verilog-mode "l" kitty-verilog-lint)
+                   (verilog-mode "m" kitty-verilog-lint)
+                   (verilog-mode "r" kitty-verilog-simulate)
+                   (verilog-mode "w" kitty-verilog-waves)
                    (verilog-mode "i m" verilog-sk-module)
                    (nix-ts-mode "f" kitty-format)
                    (elfeed-search-mode "a" kitty-rss-mark-all-read)))

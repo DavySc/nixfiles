@@ -1,22 +1,23 @@
 # kittymax
 
-A Doom-inspired Emacs on [meow](https://github.com/meow-edit/meow) (selection
-first, then the verb) with catppuccin mocha, built for NixOS. Fast to start,
-real multiple cursors, and good at the things I write: org, markdown, C, C++,
-C#, SQL, Verilog / SystemVerilog, Nix.
+An Emacs with my Neovim config's keys, for the jobs Emacs does best (org,
+magit, dired, elfeed ...) without retraining my fingers: Neovim
+([my-nvim](https://github.com/DavySc/my-nvim)) is the main editor and the
+source of truth for every key. evil, catppuccin mocha, built for NixOS, fast to
+start, and good at the things I write: org, markdown, C, C++, C#, SQL, Verilog
+/ SystemVerilog, Nix.
 
 ```
 early-init.el        before the first frame: GC off, no flash, package-quickstart
 init.el              loads the modules below
 lisp/kitty-platform  Nix vs Windows: state directories, where packages come from
 lisp/kitty-packages  the package list; installs it from ELPA/MELPA without Nix
-lisp/kitty-lib       loader (compiles into the cache), keymap helpers, SPC m
+lisp/kitty-lib       loader (compiles into the cache), keymap helpers, the leader maps
 lisp/kitty-core      defaults, performance, state directories
 lisp/kitty-ui        catppuccin mocha, doom-modeline, fonts, icons, which-key, splash
 lisp/kitty-cat       a kitten gives you a paw when you save
-lisp/kitty-meow      modal editing and the SPC leader tree
-lisp/kitty-mc        multiple cursors on meow's beacon
-lisp/kitty-ex        the : command line (:q :w :wq :e :%s ...)
+lisp/kitty-evil      Vim keys and the SPC leader tree, as in my-nvim
+lisp/kitty-vim       my-nvim's operators, text objects and multiple cursors
 lisp/kitty-completion vertico orderless marginalia consult embark corfu cape
 lisp/kitty-vc        magit, diff-hl
 lisp/kitty-dired     dired + dirvish
@@ -36,7 +37,7 @@ It is wired into `home.nix` already: `sudo nixos-rebuild switch --flake ~/nixos-
 then `kittymax` (a window through WSLg) or `kittymax -nw`.
 
 The Lisp is **not** in the Nix store: `~/.config/kittymax` is a symlink to this
-directory, so editing a file and `SPC h r` (reload) needs no rebuild. Adding a
+directory, so editing a file and `SPC R` (reload) needs no rebuild. Adding a
 package or a tool to `package.nix` does.
 
 Per-machine settings go in `kittymax/local.el` (git-ignored): `org-directory`,
@@ -66,13 +67,15 @@ Different on Windows:
 
 - **Tree-sitter grammars** are not bundled. `treesit-auto` offers to build the
   one a file needs (it needs a C compiler, e.g. from MSYS2); until then the
-  classic mode of that language is used, which is fine.
+  classic mode of that language is used, which is fine, and the tree-sitter
+  text objects (`if` / `af` calls, `S`, `an` / `in`) fall back or say so.
 - **Not installed** because they need a Unix pty, a native module or a binary
-  Windows lacks: `eat` (`SPC o t` opens eshell instead), `jinx` (spell
+  Windows lacks: `eat` (`SPC t t` and `C-/` open eshell instead; Claude Code
+  on `SPC a` needs eat, so it is not there), `jinx` (spell
   checking uses flyspell if aspell/hunspell is on `PATH`), `eglot-booster`.
 - **Language servers and tools** that winget has no package for: install
   verible, verilator and iverilog (hardware) and sqls (SQL) yourself and put
-  them on `PATH`; kittymax uses what it finds. `SPC o s` (psql) needs the
+  them on `PATH`; kittymax uses what it finds. `SPC t s` (psql) needs the
   PostgreSQL client tools. sqldiff: install Rust (`winget install
   Rustlang.Rustup`) and `cargo install --git https://github.com/DavySc/SQLDiff
   sqldiff-cli`, which puts `sqldiff.exe` in `%USERPROFILE%\.cargo\bin`.
@@ -90,32 +93,65 @@ ELPA). `KITTYMAX_FRAME=windowed` or `maximized` replaces the full-screen start.
 
 ## Keys
 
-meow's normal state, QWERTY layout. You select, then act:
+They are my-nvim's. Neovim is the source of truth: a key it defines does the
+same thing here, and Emacs-only commands sit on keys it leaves free, so
+nothing here teaches a habit that is wrong in Neovim.
 
-| Select | | Act | | Move | |
-| --- | --- | --- | --- | --- | --- |
-| `w` `W` word, symbol | | `d` delete (`D` backwards) | | `h j k l` | `H J K L` extend |
-| `x` line | | `c` change | | `b` `e` word back / forward | |
-| `o` block | | `s` kill, `y` copy, `p` paste | | `f` `t` find / till char | |
-| `,` `.` inner / bounds of a thing | | `i` `a` insert / append, `I` `A` open line | | `v` visit, `n` next match | |
-| `[` `]` beginning / end of a thing | | `r` replace, `m` join | | `/` search the buffer | |
-| `g` cancel selection | | `u` undo, `U` in selection | | `Q` goto line | |
+**Vim**, through evil, with my-nvim's settings: relative line numbers,
+`ignorecase` + `smartcase`, `scrolloff` 6, undo kept across restarts
+(undo-fu-session), `Y` to the end of the line, `C-u` / `C-d` scroll, splits
+to the right and below, `f` / `t` across lines, `:s` previewing as you type.
+`C-k` in insert mode is Vim's digraphs. `C-x` stays Emacs's prefix key (Vim's
+decrement is `-1 C-a`); `C-h` is Emacs's help.
 
-Things after `,` / `.`: `r` round, `s` square, `c` curly, `a` angle, `g` string,
-`e` symbol, `p` paragraph, `l` line, `d` defun, `b` buffer.
+| Key | What (as in my-nvim) |
+| --- | --- |
+| `s` | jump to anything on screen (flash → avy), also after an operator |
+| `S`, visual `an` / `in` | select a syntax node, grow / shrink it (tree-sitter) |
+| `ys{motion}{char}`, `cs`, `ds`, visual `gs` | surround (`*` makes `**bold**` in markdown) |
+| `ga{motion}{char}` | align: `gaip=` |
+| `gc{motion}`, `gcc` | comment |
+| `ia` `if` `iq` `ib` (and `a...`) | argument, call, any quote, any bracket (mini.ai) |
+| `iN(` `aL"` ... | the next / last pair of that kind: `ciN(` |
+| `ih` | the changed hunk: `dih`, `yih` |
+| `C-n` / `SPC M` / `Q` | a cursor on the next match / every match / here; `]C` `[C` between them, `C-l` clears (so does `Esc` for match cursors), `gQ` brings them back. Match cursors are evil-multiedit (one edit mirrored into every match: instant with thousands), `Q`'s are evil-mc |
+| `gd` `gD` `grr` `gri` `grn` `gra` `grt` `gO` `K` | the language server (eglot), Neovim 0.12's keys; `C-s` in insert mode: signature |
+| `]d` `[d`, `C-w d` | next / previous diagnostic, the one under the cursor |
+| `]h` `[h` | next / previous changed hunk |
+| `-` | the file's directory (dired as oil, below) |
+| `C-/` | a terminal that pops up and away |
+| `C-a` | the number (in org: the date) under or after the cursor, up |
+| `C-n` `C-p` `C-y` `C-e`, `Tab` | completion: pick, accept, close; Enter only accepts what you picked |
 
-`SPC` opens the leader tree (which-key shows it); `SPC x` is the `C-x` map.
+**The leader** is `SPC` (which-key shows it), laid out as my-nvim's:
 
 | | | | |
 | --- | --- | --- | --- |
-| `SPC SPC` commands | `SPC .` find file | `SPC ,` buffers | `SPC /` ripgrep |
-| `SPC b` buffer | `SPC f` file | `SPC p` project | `SPC g` git |
-| `SPC w` window | `SPC s` search | `SPC c` code | `SPC o` open |
-| `SPC n` notes | `SPC t` toggle | `SPC h` help | `SPC q` quit |
-| `SPC k` cursors | `SPC j` jump | `SPC i` insert | `SPC m` **this mode's keys** |
+| `SPC f f` find files | `SPC f g` grep | `SPC ,` buffers | `SPC e` file tree |
+| `SPC g` git (`g` magit, `h` file history) | `SPC h` hunks (`s` stage, `r` reset, `p` preview) | `SPC x` diagnostics | `SPC c a` / `SPC r n` code action / rename |
+| `SPC c s` symbols | `SPC d` debug (dape) | `SPC a` Claude Code | `SPC o a` / `SPC o c` agenda / capture |
+| `SPC u` toggles (`k` kitten, `z` zen, `u` undo tree, `h` hints, `p` org symbols) | `SPC f r` registers, `SPC f t` terminal | `SPC p v` dired | `SPC R` reload, `SPC X` eval line |
+| `SPC SPC x` eval this file | `SPC m` **this mode's keys** | | |
 
-`SPC m` changes with the mode (org, markdown, C, C#, SQL, Verilog ...): look at
-it with which-key whenever you are in one.
+Emacs-only, on prefixes my-nvim leaves free: `SPC b` buffers, `SPC p` projects,
+`SPC s` search, `SPC n` notes, `SPC t` tools (terminal, eshell, rss, sql,
+markdown preview), `SPC i` insert, `SPC q` quit, `SPC H` help, `SPC :` M-x.
+
+`SPC m` changes with the mode; where my-nvim has the same keys they match:
+`SPC m m` builds (C) or lints (Verilog), `SPC m r` runs, `SPC m d` debugs,
+`SPC m g` configures, `SPC m a` switches source / header, `SPC m w` opens
+waves.
+
+**Org** has nvim-orgmode's keys: `cit` / `ciT` TODO state, `cid` date, `ciR` /
+`cir` priority, `<<` / `>>` on a heading, `TAB` / `S-TAB` folding, `C-SPC`
+checkbox, `}` `{` `]]` `[[` `g{` headings, and `SPC o ...` (`r` refile, `t`
+tags, `$` archive, `i d` / `i s` deadline / schedule, `l i` link, `x i` / `x o`
+clock, `SPC RET` new heading or item). In capture buffers `C-c` files it. The
+agenda: `f` / `b` later / earlier, `.` today, `vd` `vw` `vm` views, `t` todo,
+`J` a date, `r` redo, `q` quit.
+
+**Ex commands**: Vim's (`:w` `:q` `:e` `:s` `:g` ...) and my-nvim's `:Format`,
+`:Ex`, `:Oil`, `:Neogit`, `:Undotree`, `:KittenPaw`, `:ConfigReload`.
 
 ## When you save
 
@@ -130,43 +166,17 @@ A kitten in the echo area blinks and gives you a paw:
 It takes about a second and blocks nothing: any key sends it away, and
 `=^.^= saved notes.org` stays behind. It plays only for the buffer you are
 looking at, never over a minibuffer prompt, and once per save even when a
-formatter saves again. `SPC t k` turns it off (`(kitty-cat-mode -1)` in
+formatter saves again. `SPC u k` turns it off (`(kitty-cat-mode -1)` in
 `local.el` to keep it off), and `M-x kitty-cat-paw` calls it whenever you need one.
 
-## The `:` command line
+## Files: dired as oil
 
-`:` in the normal state is a small vi-style command line.
-
-| | |
-| --- | --- |
-| `:q` `:qa` | exit Emacs (asks about unsaved buffers); `:q!` exits without asking |
-| `:w` `:w file` `:wa` | save, save as, save everything |
-| `:wq` `:x` | save this buffer and exit |
-| `:e file` `:e!` | open a file, revert the buffer |
-| `:bd` `:bn` `:bp` | kill, next, previous buffer |
-| `:sp` `:vs` `:only` `:close` | split below / right, keep only this window, close it |
-| `:42` | go to line 42 |
-| `:%s/a/b/g` `:s/a/b/` | substitute in the buffer / on this line or region (Emacs regexps) |
-
-Anything else is tried as an Emacs command name, so `:magit-status` works.
-
-## Multiple cursors
-
-meow does not copy editor state to a pile of cursors; it records a keyboard
-macro and replays it at every position you picked, which stays fast with
-thousands. The picking is what these commands do:
-
-| Keys | |
-| --- | --- |
-| `C` | add a cursor on the next match of the selection (or the symbol at point). Press again for the next. `SPC k p` goes backwards, `SPC k u` drops the last. |
-| `M` | cursors on every match in the buffer |
-| `SPC k l` | a cursor on every line of the region (`C-u`: keep the column) |
-| `SPC k r` | cursors on every regexp match inside the region |
-| `<escape>` | leave multiple-cursor mode |
-
-Then edit normally: `c` changes at every cursor, `i` / `a` insert / append at
-each, `d` deletes. For anything more, `F3` ... `F4` records a macro and applies
-it to all of them. `G` (grab) restricts the cursors to a region first.
+`-` opens the file's directory with the cursor on it (`nvim .`'s oil). Like oil,
+the listing is text you edit: `i` `a` `c` ... start editing names (wdired),
+`dd` marks a file for deletion, and `:w` applies it all. `-` goes up, `RET`
+opens, `C-p` previews, `g.` hides dotfiles, `gd` shows sizes and dates, `ga`
+jumps to home, projects, nixos-config or `~/.config`, `q` closes. `SPC e` is
+the sidebar tree.
 
 ## Markdown
 
@@ -175,16 +185,16 @@ scaled, tables aligned (valign), code in monospace. Markup (`**`, `#`, backticks
 link targets) is hidden except on the line you are on. Lists, checkboxes and
 tables continue as you type; `RET` on a link follows it, on a task toggles it.
 Images show inline; `SPC m i p` pastes one from the clipboard into `assets/`.
-Code blocks are highlighted in their language, `SPC m e` edits one in its own
+Code blocks are highlighted in their language, `SPC c e` (or `SPC m e`) edits one in its own
 buffer. marksman completes and checks links and headings, `SPC m p` previews
 live, `SPC m E` exports with pandoc, `SPC m i T` writes a table of contents.
 Prettier formats on request only (`SPC c f`), never on save.
 
 ## RSS
 
-`SPC o r` opens elfeed and fetches every feed. The feeds are an org file,
+`SPC t r` opens elfeed and fetches every feed. The feeds are an org file,
 `elfeed.org` in `org-directory` (elfeed-org), created with a few examples the
-first time; `SPC o R` opens it. One feed link per heading, under a heading
+first time; `SPC t R` opens it. One feed link per heading, under a heading
 tagged `:elfeed:`; tags are inherited, so feeds under `** Emacs :emacs:` are
 tagged `emacs`. Set `kitty-rss-feeds-file` in `local.el` to keep it elsewhere.
 
@@ -197,10 +207,10 @@ filters. Entries are shown wrapped and centred like markdown.
 
 | | server | format | `SPC m` |
 | --- | --- | --- | --- |
-| C / C++ | clangd | clang-format (with a `.clang-format`) | CMake/Ninja or Make, run, ctest, gdb, header/source |
-| C# | csharp-ls | the server, on save | `dotnet` build / run / test / watch, add package |
+| C / C++ | clangd | clang-format (with a `.clang-format`) | `m` build, `r` run, `d` gdb, `g` configure, `a` header/source, `T` ctest |
+| C# | csharp-ls | the server, on save | `dotnet`: `m` build, `r` run, `t` test, `w` watch, `p` add package |
 | SQL | sqls (`SPC m L`), sqldiff (flymake) | by dialect, see below | connect, send, describe table, sqldiff (`D` with file, `k` check), `t` dialect |
-| Verilog, SystemVerilog | verible | verible | verilator lint, iverilog + vvp, gtkwave, AUTOs, templates |
+| Verilog, SystemVerilog | verible | verible | `m` verilator lint, `r` iverilog + vvp, `w` gtkwave, AUTOs, templates |
 | Nix | nil | nixfmt | rebuild |
 
 Verilog buffers are also linted by verilator as you type (flymake), for the
@@ -250,10 +260,14 @@ and after and warns if the formatter changed what the code means.
   first use (and again when a file changes); Emacs native-compiles it in the
   background after that.
 - Everything optional is deferred: modes load with their files, not at startup.
+- evil, the biggest piece (about 140 ms byte-compiled), loads the moment Emacs
+  first waits for a key, after the first frame is drawn; the splash has keys
+  of its own, and a file named on the command line gets the Vim keys as soon
+  as evil is in.
 - Rendering and LSP are tuned: `jit-lock` deferral, no bidi scanning, a 4 MB
   process read size, emacs-lsp-booster for JSON, no events buffer, so-long.
 
-`SPC h s` prints what startup cost, module by module.
+`SPC H s` prints what startup cost, module by module.
 
 ## When something breaks
 
@@ -268,9 +282,10 @@ mode hook switches off syntax highlighting for every buffer of that mode.
 kittymax/test/run.sh
 ```
 
-loads the real meow, markdown-mode and verilog-mode: multiple cursors on a
-live meow beacon (every command above, with edits applied), the markdown
-reveal-on-current-line behaviour, the verilator flymake backend against a fake
+runs inside kittymax's own Emacs (`KITTYMAX_EMACS` for another): every my-nvim
+leader key against the command it should run here (`kitty-keys-test.el`, with
+nvim-orgmode's and markdown's buffer-only keys, `C-a` and SQL statements), the
+markdown reveal-on-current-line behaviour, the verilator flymake backend against a fake
 verilator, the loader and keymap helpers, and a smoke test that loads the whole
 configuration with no third-party packages at all and checks it degrades
 instead of failing.

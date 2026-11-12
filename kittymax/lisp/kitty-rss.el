@@ -2,17 +2,16 @@
 
 ;;; Commentary:
 
-;; `SPC o r' opens elfeed and fetches every feed.  The feeds are an org file,
+;; `SPC t r' opens elfeed and fetches every feed.  The feeds are an org file,
 ;; `elfeed.org' in `org-directory' (elfeed-org): one heading per feed, tags
 ;; are inherited, so a heading "Emacs :emacs:" with links under it tags all
-;; of them.  `SPC o R' (or `SPC m F' in elfeed) opens that file; the first
+;; of them.  `SPC t R' (or `SPC m F' in elfeed) opens that file; the first
 ;; time it is created with an example.  The database is in the data
 ;; directory (no-littering), not in the checkout.
 ;;
-;; elfeed starts in meow's MOTION state: j / k move, the elfeed keys are the
-;; ones you press (RET read, b browser, s filter, g refresh, G fetch, + / -
-;; tag, u / r unread / read, q quit and save), SPC is the leader; SPC m has
-;; the rest (mark all read, filters, star).
+;; elfeed has evil-collection's Vim-style keys (j / k move, RET reads, q
+;; quits); SPC is the leader, and SPC m has the rest (mark all read,
+;; filters, star).
 
 ;;; Code:
 
@@ -42,7 +41,7 @@
 (defconst kitty-rss--template
   "#+title: Feeds
 # One link per heading, under a heading tagged :elfeed:.  Tags are inherited:
-# every feed below \"Emacs\" is tagged emacs.  SPC o r reads them, G fetches.
+# every feed below \"Emacs\" is tagged emacs.  SPC t r reads them, G fetches.
 
 * Feeds :elfeed:
 ** Emacs :emacs:

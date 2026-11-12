@@ -131,9 +131,10 @@ Modules it instantiates are looked up next to it."
     (start-process "gtkwave" nil "gtkwave" vcd)))
 
 (dolist (mode '(verilog-mode verilog-ts-mode))
+  ;; my-nvim's <leader>m keys (ftplugin/verilog.lua): mm lint, mr run, mw waves.
   (kitty-local-leader mode
-    "l" '("lint (verilator)" . kitty-verilog-lint)
-    "s" '("simulate" . kitty-verilog-simulate)
+    "m" '("lint (verilator)" . kitty-verilog-lint)
+    "r" '("run (iverilog + vvp)" . kitty-verilog-simulate)
     "w" '("waves" . kitty-verilog-waves)
     "a" '("AUTO expand" . verilog-auto)
     "A" '("AUTO delete" . verilog-delete-auto)

@@ -1,6 +1,6 @@
 ;;; init.el --- kittymax  -*- lexical-binding: t; -*-
 
-;; A Doom-inspired, meow-based Emacs. This file only wires the modules in
+;; An Emacs with my-nvim's keys (evil). This file only wires the modules in
 ;; lisp/ together; each one is a few hundred lines about one topic.
 ;;
 ;;   kitty-platform    Nix vs Windows: state directories, where packages come from
@@ -10,9 +10,8 @@
 ;;   kitty-ui          catppuccin mocha, modeline, fonts, icons, which-key
 ;;   kitty-splash      the start screen
 ;;   kitty-cat         a kitten gives you a paw when you save
-;;   kitty-meow        modal editing and the SPC leader tree
-;;   kitty-mc          multiple cursors on top of meow's beacon
-;;   kitty-ex          the : command line (:q :w :wq :e :%s ...)
+;;   kitty-evil        Vim keys and the SPC leader tree, as in my-nvim
+;;   kitty-vim         my-nvim's operators, text objects and multiple cursors
 ;;   kitty-completion  vertico, orderless, consult, embark, corfu
 ;;   kitty-vc          magit, diff-hl
 ;;   kitty-dired       dirvish
@@ -34,9 +33,8 @@
 (kitty-load 'kitty-ui)
 (kitty-load 'kitty-splash)
 (kitty-load 'kitty-cat)
-(kitty-load 'kitty-meow)
-(kitty-load 'kitty-mc)
-(kitty-load 'kitty-ex)
+(kitty-load 'kitty-evil)
+(kitty-load 'kitty-vim)
 (kitty-load 'kitty-completion)
 (kitty-load 'kitty-vc)
 (kitty-load 'kitty-dired)

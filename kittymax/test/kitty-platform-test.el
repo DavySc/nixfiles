@@ -53,7 +53,7 @@
 (ert-deftest kitty-platform-package-key-changes-with-installed-packages ()
   (let ((dir (make-temp-file "elpa" t)))
     (let ((empty (kitty-package-key nil dir)))
-      (make-directory (expand-file-name "meow-1.0" dir))
+      (make-directory (expand-file-name "evil-1.0" dir))
       (let ((one (kitty-package-key nil dir)))
         (should-not (equal empty one))
         (make-directory (expand-file-name "magit-3.0" dir))
@@ -97,7 +97,7 @@
 (ert-deftest kitty-packages-windows-leaves-out-the-unix-only-ones ()
   (let ((win (kitty-wanted-packages 'windows-nt)))
     (dolist (p kitty-packages-not-on-windows) (should-not (memq p win)))
-    (should (memq 'meow win))
+    (should (memq 'evil win))
     (should (memq 'magit win))
     (should (= (length win) (- (length kitty-packages) (length kitty-packages-not-on-windows)))))
   (should (equal kitty-packages (kitty-wanted-packages 'gnu/linux))))
@@ -125,18 +125,18 @@ EXTRA is more stubs.  Return (INSTALLS REFRESHES)."
     (list (nreverse installs) refreshes)))
 
 (ert-deftest kitty-packages-missing-ones-are-found ()
-  (kitty-test--with-install-stubs '(meow magit)
+  (kitty-test--with-install-stubs '(evil magit)
     (lambda ()
       (let ((missing (kitty-missing-packages)))
-        (should-not (memq 'meow missing))
+        (should-not (memq 'evil missing))
         (should-not (memq 'magit missing))
         (should (memq 'vertico missing))))))
 
 (ert-deftest kitty-packages-ensure-installs-only-what-is-missing ()
-  (let* ((have (cl-remove-if (lambda (p) (memq p '(meow vertico))) (kitty-wanted-packages)))
+  (let* ((have (cl-remove-if (lambda (p) (memq p '(evil vertico))) (kitty-wanted-packages)))
          (result (kitty-test--with-install-stubs have #'kitty-ensure-packages
                                                  (list (cons 'kitty-package-source (lambda (&rest _) 'elpa))))))
-    (should (equal '(meow vertico) (sort (copy-sequence (car result)) #'string<)))
+    (should (equal '(evil vertico) (sort (copy-sequence (car result)) #'string<)))
     (should (= 1 (cadr result)))))
 
 (ert-deftest kitty-packages-ensure-does-nothing-when-nothing-is-missing ()
@@ -157,8 +157,8 @@ EXTRA is more stubs.  Return (INSTALLS REFRESHES)."
            (cons 'redisplay #'ignore)
            (cons 'display-warning (lambda (_type msg &rest _) (push msg warnings)))
            (cons 'package-install (lambda (p &rest _) (if (eq p 'vertico) (error "boom") (push p installed)))))
-     (lambda () (kitty-install-packages '(meow vertico magit))))
-    (should (equal '(meow magit) (nreverse installed)))
+     (lambda () (kitty-install-packages '(evil vertico magit))))
+    (should (equal '(evil magit) (nreverse installed)))
     (should (seq-find (lambda (w) (string-match-p "vertico failed" w)) warnings))))
 
 (ert-deftest kitty-packages-an-unreachable-archive-is-reported ()
@@ -168,8 +168,8 @@ EXTRA is more stubs.  Return (INSTALLS REFRESHES)."
            (cons 'redisplay #'ignore)
            (cons 'display-warning (lambda (_type msg &rest _) (push msg warnings)))
            (cons 'package-install (lambda (p &rest _) (push p installed))))
-     (lambda () (kitty-install-packages '(meow))))
+     (lambda () (kitty-install-packages '(evil))))
     (should (seq-find (lambda (w) (string-match-p "offline" w)) warnings))
-    (should (equal '(meow) installed))))
+    (should (equal '(evil) installed))))
 
 ;;; kitty-platform-test.el ends here
