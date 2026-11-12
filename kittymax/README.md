@@ -67,9 +67,11 @@ Different on Windows:
 
 - **Tree-sitter grammars** are not bundled. `treesit-auto` offers to build the
   one a file needs (it needs a C compiler, e.g. from MSYS2); until then the
-  classic mode of that language is used, which is fine.
+  classic mode of that language is used, which is fine, and the tree-sitter
+  text objects (`if` / `af` calls, `S`, `an` / `in`) fall back or say so.
 - **Not installed** because they need a Unix pty, a native module or a binary
-  Windows lacks: `eat` (`SPC t t` opens eshell instead), `jinx` (spell
+  Windows lacks: `eat` (`SPC t t` and `C-/` open eshell instead; Claude Code
+  on `SPC a` needs eat, so it is not there), `jinx` (spell
   checking uses flyspell if aspell/hunspell is on `PATH`), `eglot-booster`.
 - **Language servers and tools** that winget has no package for: install
   verible, verilator and iverilog (hardware) and sqls (SQL) yourself and put
@@ -112,7 +114,7 @@ decrement is `-1 C-a`); `C-h` is Emacs's help.
 | `ia` `if` `iq` `ib` (and `a...`) | argument, call, any quote, any bracket (mini.ai) |
 | `iN(` `aL"` ... | the next / last pair of that kind: `ciN(` |
 | `ih` | the changed hunk: `dih`, `yih` |
-| `C-n` / `SPC M` / `Q` | a cursor on the next match / every match / here; `]C` `[C` between them, `C-l` clears, `gQ` brings them back |
+| `C-n` / `SPC M` / `Q` | a cursor on the next match / every match / here; `]C` `[C` between them, `C-l` clears (so does `Esc` for match cursors), `gQ` brings them back. Match cursors are evil-multiedit (one edit mirrored into every match: instant with thousands), `Q`'s are evil-mc |
 | `gd` `gD` `grr` `gri` `grn` `gra` `grt` `gO` `K` | the language server (eglot), Neovim 0.12's keys; `C-s` in insert mode: signature |
 | `]d` `[d`, `C-w d` | next / previous diagnostic, the one under the cursor |
 | `]h` `[h` | next / previous changed hunk |
@@ -258,6 +260,10 @@ and after and warns if the formatter changed what the code means.
   first use (and again when a file changes); Emacs native-compiles it in the
   background after that.
 - Everything optional is deferred: modes load with their files, not at startup.
+- evil, the biggest piece (about 140 ms byte-compiled), loads the moment Emacs
+  first waits for a key, after the first frame is drawn; the splash has keys
+  of its own, and a file named on the command line gets the Vim keys as soon
+  as evil is in.
 - Rendering and LSP are tuned: `jit-lock` deferral, no bidi scanning, a 4 MB
   process read size, emacs-lsp-booster for JSON, no events buffer, so-long.
 

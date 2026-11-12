@@ -17,7 +17,7 @@
   '(;; core, performance
     no-littering gcmh puni avy vundo undo-fu-session
     ;; Vim keys, as in my-nvim
-    evil evil-collection evil-surround evil-mc evil-args evil-lion
+    evil evil-collection evil-surround evil-mc evil-multiedit iedit evil-args evil-lion
     evil-textobj-tree-sitter expreg
     ;; ui
     catppuccin-theme doom-modeline nerd-icons nerd-icons-completion nerd-icons-corfu

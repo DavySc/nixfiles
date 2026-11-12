@@ -23,6 +23,8 @@ let
       evil-collection
       evil-surround
       evil-mc
+      evil-multiedit
+      iedit
       evil-args
       evil-lion
       evil-textobj-tree-sitter

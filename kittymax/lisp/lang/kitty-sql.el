@@ -260,7 +260,7 @@ and the rest of its line, for the `a' object."
 (defun kitty--sql-evil-setup ()
   (setq-local evil-lookup-func #'kitty-sql-lookup))
 
-(when (require 'evil nil t)
+(with-eval-after-load 'evil
   (eval '(progn
            (evil-define-text-object kitty-sql-inner-statement (count &optional beg end type)
              "Inside the SQL statement, without its ; (my-nvim's iq)."

@@ -616,6 +616,8 @@ ARGS are extra command-line arguments, such as \"--continue\"."
 
 (defun kitty--eglot-keys ()
   "Neovim 0.12's LSP keys in buffers eglot manages."
+  ;; evil-collection binds gr (references) here; Neovim's gr is a prefix.
+  (evil-define-key* '(normal visual) eglot-mode-map (kbd "gr") nil)
   (evil-define-key* 'normal eglot-mode-map
     (kbd "gD") #'eglot-find-declaration
     (kbd "grr") #'xref-find-references
@@ -635,6 +637,13 @@ ARGS are extra command-line arguments, such as \"--continue\"."
 (defun kitty--evil-setup ()
   "Start evil, evil-collection and the keys, when evil is installed."
   (when (require 'evil nil t)
+    ;; Options whose :set rebinds keys (Y, C-u ...) only take a plain setq
+    ;; before evil loads; set them through customize so a reload, or evil
+    ;; loaded early by something else, gets them too.
+    (dolist (opt '(evil-want-Y-yank-to-eol evil-want-C-u-scroll evil-want-C-d-scroll
+                   evil-want-C-u-delete evil-want-C-w-delete evil-want-C-i-jump
+                   evil-undo-system evil-search-module))
+      (customize-set-variable opt (symbol-value opt)))
     (evil-mode 1)
     (when (require 'evil-collection nil t)
       (evil-collection-init))
@@ -647,7 +656,23 @@ ARGS are extra command-line arguments, such as \"--continue\"."
     (when (require 'undo-fu-session nil t)
       (undo-fu-session-global-mode 1))))
 
-(kitty--evil-setup)
+;; evil is most of kittymax's startup time (about 140 ms byte-compiled), and
+;; nothing on the first screen needs it: the splash has its own keys.  During
+;; startup it loads the moment Emacs first waits for a key, after the first
+;; frame is drawn; every module's evil keys wait for it
+;; (`with-eval-after-load'), and evil-mode switches it on in buffers already
+;; open (a file named on the command line).  An idle timer, not a startup hook:
+;; an error in any startup hook stops the hooks after it, and that must not
+;; leave the editor without its keys.  Loaded any other time (a reload, the
+;; tests), or with a file named on the command line (its first keys must
+;; already be Vim's), it starts at once.
+(defun kitty--files-on-command-line-p ()
+  "Non-nil when Emacs was started with files to open."
+  (seq-some (lambda (arg) (not (string-prefix-p "-" arg))) (cdr command-line-args)))
+
+(if (or after-init-time (kitty--files-on-command-line-p))
+    (kitty--evil-setup)
+  (run-with-idle-timer 0 nil #'kitty--evil-setup))
 
 (provide 'kitty-evil)
 ;;; kitty-evil.el ends here

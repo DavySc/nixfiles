@@ -34,12 +34,12 @@
 (defun kitty--diff-hl ()
   (when (require 'diff-hl nil t)
     (global-diff-hl-mode 1)
-    (diff-hl-flydiff-mode 1)
+    (when (fboundp 'diff-hl-flydiff-mode) (diff-hl-flydiff-mode 1))
     (unless (display-graphic-p) (diff-hl-margin-mode 1))
     (add-hook 'magit-pre-refresh-hook #'diff-hl-magit-pre-refresh)
     (add-hook 'magit-post-refresh-hook #'diff-hl-magit-post-refresh)
     (kitty-add-hook 'dired-mode-hook #'diff-hl-dired-mode)))
-(add-hook 'emacs-startup-hook #'kitty--diff-hl)
+(kitty-add-hook 'emacs-startup-hook #'kitty--diff-hl)
 
 ;;;; ih: the changed hunk under the cursor as a text object (gitsigns' select_hunk)
 ;;
@@ -57,7 +57,7 @@
     (diff-hl-mark-hunk)
     (list (region-beginning) (region-end))))
 
-(when (require 'evil nil t)
+(with-eval-after-load 'evil
   (eval '(evil-define-text-object kitty-hunk-object (count &optional beg end type)
            "The changed hunk under the cursor (gitsigns' ih)."
            (ignore count beg end type)

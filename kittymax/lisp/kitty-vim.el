@@ -12,9 +12,9 @@
 ;;   iq / aq  any quote    ib / ab  any bracket          tree-sitter, and here)
 ;;   iN( / aN( the next pair, iL( / aL( the last one
 ;;   S, van / vin                                        select / grow / shrink a syntax node
-;;   C-n  cursor on the word, on to its next match       multiple cursors (evil-mc)
-;;   SPC M  cursors on every match, Q  toggle a cursor here, ]C / [C  between them,
-;;   gQ  bring the last cursors back, C-l  clear them
+;;   C-n  cursor on the word, on to its next match       multiple cursors (evil-multiedit
+;;   SPC M  cursors on every match, Q  toggle a cursor here,  for matches, evil-mc for Q)
+;;   ]C / [C  between them, gQ  bring the last ones back, C-l  clear them
 ;;
 ;; Everything here needs evil; without it the module does nothing.  The text
 ;; objects and the operator are evil macros, evaluated when the module loads
@@ -149,27 +149,65 @@
              (kitty-node-range (point) (min (point-max) (1+ (point))) t))))
     (evil-visual-select (car r) (cadr r))))
 
-;;;; Multiple cursors (Neovim 0.13's, on evil-mc)
+;;;; Multiple cursors (Neovim 0.13's keys)
+;;
+;; Two engines, each where it is fast:
+;; - Cursors on matches (C-n, SPC M), nearly every use: evil-multiedit, on
+;;   iedit.  One edit is mirrored into every match through overlays, so it
+;;   stays instant with thousands of them (meow's beacon was the same).
+;; - A cursor anywhere (Q): evil-mc, which replays each command at every
+;;   cursor; fine for the handful you place by hand.
+;; ]C / [C, C-l and gQ work on whichever is active.  In a multiedit, Esc also
+;; ends it (evil-multiedit's own behaviour).
 
 ;; evil-mc's own keys sit under gr, which is the LSP's here (grr gri grn gra):
 ;; start it with an empty map and bind my-nvim's keys instead.
 (defvar evil-mc-key-map (make-sparse-keymap))
 
+;; C-n marks the word under the cursor and jumps to its next match, as Neovim's
+;; \<word\> search does.
+(defvar evil-multiedit-follow-matches t)
+(defvar evil-multiedit-use-symbols nil)
+(defvar evil-multiedit-mode-map)
+(defvar evil-multiedit--dont-recall)
+(declare-function evil-multiedit-match-and-next "evil-multiedit")
+(declare-function evil-multiedit-match-all "evil-multiedit")
+(declare-function evil-multiedit-next "evil-multiedit")
+(declare-function evil-multiedit-prev "evil-multiedit")
+(declare-function evil-multiedit-abort "evil-multiedit")
+(declare-function evil-multiedit-restore "evil-multiedit")
+
+(defvar kitty--mc-last-kind nil
+  "Which cursors C-l cleared last: `multiedit' or `mc', for `kitty-mc-restore'.")
+
+(defun kitty--multiedit ()
+  (unless (require 'evil-multiedit nil t) (user-error "evil-multiedit is not installed")))
+
+(defun kitty--multiedit-active-p ()
+  (bound-and-true-p evil-multiedit-mode))
+
 (defun kitty--mc ()
   (unless (require 'evil-mc nil t) (user-error "evil-mc is not installed"))
   (unless (bound-and-true-p evil-mc-mode) (evil-mc-mode 1)))
 
+(defun kitty--mc-active-p ()
+  (and (bound-and-true-p evil-mc-mode) evil-mc-cursor-list))
+
 (defun kitty-mc-next ()
   "A cursor on the word, then on to its next match (my-nvim's C-n)."
   (interactive)
-  (kitty--mc)
-  (evil-mc-make-and-goto-next-match))
+  (kitty--multiedit)
+  ;; At the last match Neovim stays put; an error here would also throw away
+  ;; the keys typed after C-n (Emacs discards typeahead on errors).
+  (condition-case err
+      (call-interactively #'evil-multiedit-match-and-next)
+    (error (message "%s" (error-message-string err)))))
 
 (defun kitty-mc-all ()
   "A cursor on every match of the word (my-nvim's <leader>M)."
   (interactive)
-  (kitty--mc)
-  (evil-mc-make-all-cursors))
+  (kitty--multiedit)
+  (evil-multiedit-match-all))
 
 (defun kitty-mc-toggle ()
   "Add a cursor here, or remove the one that is here (Neovim's Q)."
@@ -180,35 +218,44 @@
     (evil-mc-make-cursor-here)))
 
 (defvar-local kitty--mc-last nil
-  "Where the cursors were when they were last cleared, for `kitty-mc-restore'.")
+  "Where evil-mc's cursors were when they were last cleared, for `kitty-mc-restore'.")
 
 (defun kitty-mc-clear ()
   "Remove the extra cursors (Neovim's C-l), then redraw as C-l does."
   (interactive)
-  (when (and (bound-and-true-p evil-mc-mode) evil-mc-cursor-list)
-    (setq kitty--mc-last (mapcar #'evil-mc-get-cursor-start evil-mc-cursor-list))
-    (evil-mc-undo-all-cursors))
-  (recenter))
+  (cond ((kitty--multiedit-active-p)
+         (setq kitty--mc-last-kind 'multiedit)
+         ;; evil-multiedit only remembers sessions started with C-n; SPC M's
+         ;; too, so gQ can bring them back.
+         (let ((evil-multiedit--dont-recall nil))
+           (evil-multiedit-abort)))
+        ((kitty--mc-active-p)
+         (setq kitty--mc-last-kind 'mc
+               kitty--mc-last (mapcar #'evil-mc-get-cursor-start evil-mc-cursor-list))
+         (evil-mc-undo-all-cursors)))
+  (when (eq (window-buffer) (current-buffer)) (recenter)))
 
 (defun kitty-mc-restore ()
   "Bring back the cursors the last C-l cleared (Neovim's gQ)."
   (interactive)
-  (unless kitty--mc-last (user-error "No cursors to bring back"))
-  (kitty--mc)
-  (dolist (pos kitty--mc-last)
-    (when (<= (point-min) pos (point-max)) (evil-mc-make-cursor-at-pos pos))))
+  (pcase kitty--mc-last-kind
+    ('multiedit (kitty--multiedit) (evil-multiedit-restore))
+    ('mc (kitty--mc)
+         (dolist (pos kitty--mc-last)
+           (when (<= (point-min) pos (point-max)) (evil-mc-make-cursor-at-pos pos))))
+    (_ (user-error "No cursors to bring back"))))
 
 (defun kitty-mc-goto-next ()
   "Go to the next cursor (Neovim's ]C)."
   (interactive)
-  (kitty--mc)
-  (evil-mc-skip-and-goto-next-cursor))
+  (cond ((kitty--multiedit-active-p) (evil-multiedit-next))
+        (t (kitty--mc) (evil-mc-skip-and-goto-next-cursor))))
 
 (defun kitty-mc-goto-prev ()
   "Go to the previous cursor (Neovim's [C)."
   (interactive)
-  (kitty--mc)
-  (evil-mc-skip-and-goto-prev-cursor))
+  (cond ((kitty--multiedit-active-p) (evil-multiedit-prev))
+        (t (kitty--mc) (evil-mc-skip-and-goto-prev-cursor))))
 
 ;;;; Vim's C-a: the number under or after the cursor, up by COUNT
 ;;
@@ -317,6 +364,7 @@
 
 (defun kitty--vim-keys ()
   "The operators and cursor keys."
+  (require 'evil-lion nil t)
   (evil-define-key* '(normal visual) 'global
     (kbd "gc") #'kitty-comment
     (kbd "ga") #'evil-lion-left
@@ -328,9 +376,14 @@
     (kbd "]C") #'kitty-mc-goto-next
     (kbd "[C") #'kitty-mc-goto-prev
     (kbd "C-l") #'kitty-mc-clear
-    (kbd "C-a") #'kitty-increment))
+    (kbd "C-a") #'kitty-increment)
+  ;; Inside a multiedit, C-n keeps adding the next match (evil-multiedit's own
+  ;; C-n would only move to it).
+  (with-eval-after-load 'evil-multiedit
+    (evil-define-key* 'normal evil-multiedit-mode-map
+      (kbd "C-n") #'evil-multiedit-match-and-next)))
 
-(when (require 'evil nil t)
+(with-eval-after-load 'evil
   (eval kitty--vim-evil-definitions t)
   (kitty--vim-objects)
   (kitty--vim-surround)

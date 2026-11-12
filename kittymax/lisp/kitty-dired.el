@@ -119,6 +119,8 @@
 (defun kitty--dired-keys ()
   "oil's keys in dired's normal state."
   (when (fboundp 'evil-define-key*)
+    ;; evil-collection binds d; oil's dd needs d as a prefix.
+    (evil-define-key* 'normal dired-mode-map (kbd "d") nil)
     (evil-define-key* 'normal dired-mode-map
       (kbd "-") #'dired-up-directory
       (kbd "RET") #'dired-find-file
@@ -137,11 +139,12 @@
       (kbd "dd") #'dired-flag-file-deletion)
     (advice-add 'evil-write :around #'kitty--dired-write)))
 
-;; After evil-collection's own dired keys, so these win.
-(if (featurep 'evil-collection)
-    (add-hook 'evil-collection-setup-hook
-              (lambda (mode _maps) (when (eq mode 'dired) (kitty--dired-keys))))
-  (with-eval-after-load 'dired (kitty--dired-keys)))
+;; Once dired and evil are both loaded, and again after evil-collection sets up
+;; dired (it loads later, after the first frame), so these keys win.
+(with-eval-after-load 'dired
+  (with-eval-after-load 'evil (kitty--dired-keys)))
+(add-hook 'evil-collection-setup-hook
+          (lambda (mode _maps) (when (eq mode 'dired) (kitty--dired-keys))))
 
 (provide 'kitty-dired)
 ;;; kitty-dired.el ends here

@@ -183,11 +183,10 @@ except on a link, which it follows."
 (defun kitty-markdown-open-below ()
   "Open a line below, continuing the list item it is in (my-nvim's o in markdown)."
   (interactive)
+  ;; Exactly what RET does at the end of the line: it continues lists.
   (end-of-line)
-  (if (save-excursion (beginning-of-line) (looking-at-p "[ \t]*\\(?:[-*+]\\|[0-9]+[.)]\\)[ \t]"))
-      (markdown-insert-list-item 1)
-    (newline-and-indent))
-  (evil-insert-state))
+  (evil-insert-state)
+  (markdown-enter-key))
 
 (defun kitty--markdown-task-item-p ()
   "Non-nil when point is on a GFM task list item."
@@ -197,7 +196,7 @@ except on a link, which it follows."
 
 (with-eval-after-load 'markdown-mode
   (define-key markdown-mode-map (kbd "RET") #'kitty-markdown-ret)
-  (when (fboundp 'evil-define-key*)
+  (with-eval-after-load 'evil
     (evil-define-key* 'normal markdown-mode-map
       (kbd "o") #'kitty-markdown-open-below
       (kbd "RET") #'kitty-markdown-ret))

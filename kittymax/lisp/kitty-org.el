@@ -225,7 +225,8 @@
             ,(if fallback
                  `(,fallback count beg end type)
                '(progn (ignore count beg end type) (list (point) (point)))))))
-     (kitty--org-change-object kitty-org-cit "cit: the next TODO state." #'org-todo evil-inner-tag)
+     (kitty--org-change-object kitty-org-cit "cit: the next TODO state."
+                               (lambda () (interactive) (org-todo 'right)) evil-inner-tag)
      (kitty--org-change-object kitty-org-ciT "ciT: the previous TODO state."
                                (lambda () (interactive) (org-todo 'left)))
      (kitty--org-change-object kitty-org-cid "cid: change the date under the cursor." #'org-time-stamp)
@@ -298,7 +299,7 @@
       (kbd "g?") #'org-agenda-help)))
 
 (with-eval-after-load 'org
-  (when (require 'evil nil t) (kitty--org-evil-keys)))
+  (with-eval-after-load 'evil (kitty--org-evil-keys)))
 
 ;; nvim-orgmode's <leader>o... in org buffers (SPC o a / SPC o c stay global).
 (kitty-mode-leader 'org-mode
