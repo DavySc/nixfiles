@@ -85,7 +85,16 @@ if (-not (Test-Path $nvimBackend) -and (Get-Command dotnet -ErrorAction Silently
         git clone https://github.com/DavySc/dbbliss.nvim $dbbliss
     }
     if (Test-Path (Join-Path $dbbliss "scripts\build.ps1")) {
-        & (Join-Path $dbbliss "scripts\build.ps1")
+        # Plain build output: each restore error is printed, not only counted.
+        $env:MSBUILDTERMINALLOGGER = "off"
+        try {
+            & (Join-Path $dbbliss "scripts\build.ps1")
+        } catch {
+            # A failed build must not stop the rest of the install.
+            Write-Warning "The dbbliss backend did not build: $_"
+            Write-Warning "The error lines above say why (error NU...: a NuGet package problem; NETSDK1045: no .NET 10 SDK yet, open a new terminal)."
+            Write-Warning "Everything else in kittymax works without it; M-x kitty-dbbliss-build tries again."
+        }
     }
 }
 

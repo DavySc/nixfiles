@@ -138,6 +138,8 @@ It is looked for in $DBBLISS_BACKEND, in my-nvim's copy of dbbliss.nvim
     (unless (executable-find "dotnet")
       (user-error "dbbliss: building the backend needs the .NET 10 SDK (dotnet) on PATH"))
     (let ((default-directory (file-name-directory (directory-file-name dir)))
+          ;; plain lines: restore errors are printed, not only counted
+          (compilation-environment (cons "MSBUILDTERMINALLOGGER=off" compilation-environment))
           (build (if (eq system-type 'windows-nt)
                      (format "powershell -NoProfile -ExecutionPolicy Bypass -File %s"
                              (shell-quote-argument (expand-file-name "scripts/build.ps1" dir)))
