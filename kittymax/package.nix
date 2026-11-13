@@ -97,6 +97,9 @@ let
       nix-ts-mode
       eat
       dape # debugging, my-nvim's <leader>d
+      tuareg # OCaml
+      dune # dune files
+      utop # OCaml toplevel in Emacs
     ];
 
   emacsWithPackages = (pkgs.emacsPackagesFor emacsPkg).emacsWithPackages packageList;
@@ -123,6 +126,14 @@ let
       pgformatter
       sqlfluff
       postgresql # psql, for sql-postgres
+      # OCaml: built for one compiler version; a project's own switch or dev shell comes first
+      ocaml
+      dune_3
+      ocamlPackages.ocaml-lsp
+      ocamlPackages.ocamlformat
+      ocamlPackages.utop
+      ocamlPackages.findlib
+      ocamlPackages.earlybird
       # Soufflé (Datalog)
       souffle
       # C# debugging, C / C++ debugging through dape

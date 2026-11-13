@@ -37,7 +37,8 @@
     ;; rss
     elfeed elfeed-org
     ;; programming
-    treesit-auto apheleia eglot-booster verilog-mode sql-indent sqlformat nix-ts-mode eat dape)
+    treesit-auto apheleia eglot-booster verilog-mode sql-indent sqlformat nix-ts-mode eat dape
+    tuareg dune utop)
   "Every package the configuration uses (tree-sitter grammars aside).")
 
 (defconst kitty-packages-not-on-windows '(jinx eat eglot-booster)

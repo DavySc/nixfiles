@@ -60,6 +60,8 @@
     ("a.md" . ,(kitty-perf--lines "## Heading %d\n\nSome text with **bold** and `code` %d, - item %d" 200))
     ("a.el" . ,(kitty-perf--lines "(defun f%d (x) \"Doc.\" (+ x %d %d))" 400))
     ("a.dl" . ,(kitty-perf--lines ".decl r%d(x: number)\nr%d(x) :- r%d(x)." 200))
+    ("a.ml" . ,(kitty-perf--lines "let f%d x = match x with Some y -> y + %d | None -> %d (* a comment *)" 400))
+    ("dune" . ,(kitty-perf--lines "(library (name lib%d) (libraries a b) (flags (:standard -w +%d-%d)))" 200))
     ("a.facts" . ,(kitty-perf--lines "%d\t%d\t%d" 400)))
   "A file per language, a few hundred lines each.")
 

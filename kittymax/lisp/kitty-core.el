@@ -145,6 +145,11 @@
 (kitty-add-hook 'prog-mode-hook (lambda () (setq-local show-trailing-whitespace t)))
 (add-hook 'before-save-hook #'delete-trailing-whitespace)
 
+;; Tools colour their errors when they think they talk to a terminal (dune,
+;; cargo, gcc ...).  The escape codes sit inside "File \"a.ml\", line 2" and
+;; break the error-line patterns, so they become faces before the buffer is parsed.
+(add-hook 'compilation-filter-hook #'ansi-color-compilation-filter)
+
 ;; Compilation output and the like should not need a keyboard shortcut to scroll.
 (setq compilation-scroll-output 'first-error
       compilation-ask-about-save nil

@@ -214,6 +214,11 @@ clang refuses -fPIC (every DLL is position-independent there), so it goes."
   (setf (alist-get 'sqlfluff-tsql apheleia-formatters)
         '("sqlfluff" "format" "--dialect" "tsql" "--nocolor" "-"))
   (setf (alist-get 'verible-format apheleia-formatters) '("verible-verilog-format" "-"))
+  ;; OCaml: apheleia's ocamlformat (the project's .ocamlformat decides; the default
+  ;; profile without one) is used as it is; .mli files and dune files are added.
+  (setf (alist-get 'dune-format apheleia-formatters) '("dune" "format-dune-file"))
+  (setf (alist-get 'tuareg-interface-mode apheleia-mode-alist) 'ocamlformat)
+  (setf (alist-get 'dune-mode apheleia-mode-alist) 'dune-format)
   ;; SQL has no formatter per mode: kitty-sql picks one per buffer, by dialect.
   (setf (alist-get 'sql-mode apheleia-mode-alist nil 'remove) nil)
   (setf (alist-get 'verilog-mode apheleia-mode-alist) 'verible-format))

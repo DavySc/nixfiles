@@ -33,7 +33,7 @@
     (should-not warnings)
     (dolist (m '(kitty-core kitty-ui kitty-splash kitty-cat kitty-evil kitty-vim kitty-completion kitty-vc
                  kitty-dired kitty-org kitty-markdown kitty-prog kitty-rss kitty-c kitty-csharp
-                 kitty-msvc kitty-sql kitty-dbbliss kitty-sqldiff kitty-souffle kitty-verilog kitty-nix))
+                 kitty-msvc kitty-ocaml kitty-sql kitty-dbbliss kitty-sqldiff kitty-souffle kitty-verilog kitty-nix))
       (should (assq m kitty--load-times))
       (should (featurep m)))))
 
@@ -42,7 +42,7 @@
   (unless (featurep 'kitty-core) (kitty-test--boot))
   (dolist (m '(kitty-core kitty-ui kitty-splash kitty-cat kitty-evil kitty-vim kitty-completion kitty-vc
                kitty-dired kitty-org kitty-markdown kitty-prog kitty-rss kitty-c kitty-csharp
-               kitty-msvc kitty-sql kitty-dbbliss kitty-sqldiff kitty-souffle kitty-verilog kitty-nix))
+               kitty-msvc kitty-ocaml kitty-sql kitty-dbbliss kitty-sqldiff kitty-souffle kitty-verilog kitty-nix))
     (should (file-exists-p (expand-file-name (format "elc/%s.elc" m) kitty-cache-dir)))))
 
 (ert-deftest kitty-smoke-leader-tree ()
@@ -68,6 +68,9 @@
                    (csharp-ts-mode "m" kitty-csharp-build)
                    (csharp-ts-mode "t" kitty-csharp-test-at-point)
                    (csharp-ts-mode "d" kitty-csharp-debug)
+                   (tuareg-mode "m" kitty-ocaml-build)
+                   (tuareg-mode "a" tuareg-find-alternate-file)
+                   (dune-mode "t" kitty-ocaml-test)
                    (souffle-mode "m" kitty-souffle-make)
                    (souffle-mode "r" kitty-souffle-run)
                    (sql-mode "e" kitty-dbbliss-exec)

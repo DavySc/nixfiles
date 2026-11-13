@@ -5,7 +5,7 @@ magit, dired, elfeed ...) without retraining my fingers: Neovim
 ([my-nvim](https://github.com/DavySc/my-nvim)) is the main editor and the
 source of truth for every key. evil, catppuccin mocha, built for NixOS and
 native Windows, fast to start, and good at the things I write: org, markdown,
-C, C++, C#, SQL, Soufflé, Verilog / SystemVerilog, Nix.
+C, C++, C#, OCaml, SQL, Soufflé, Verilog / SystemVerilog, Nix.
 
 On my Windows work machine it stands in for two heavy programs: **SQL Server
 Management Studio** ([Databases](#databases-in-place-of-ssms)) and **Visual
@@ -32,7 +32,7 @@ lisp/kitty-ob-csharp C# org blocks through .NET 10's file-based apps
 lisp/kitty-markdown  the markdown editing experience
 lisp/kitty-prog      tree-sitter, eglot (+ emacs-lsp-booster), flymake, apheleia
 lisp/kitty-rss       elfeed: RSS and Atom feeds
-lisp/lang/           c (+ msvc), csharp, sql (+ dbbliss, sqldiff), souffle, verilog, nix
+lisp/lang/           c (+ msvc), csharp, ocaml, sql (+ dbbliss, sqldiff), souffle, verilog, nix
 package.nix          Emacs with all packages + language servers + tools = `kittymax`
 windows/             kittymax.cmd (launcher) and install.ps1 (winget) for native Windows
 test/                ERT tests (test/run.sh)
@@ -225,6 +225,7 @@ filters. Entries are shown wrapped and centred like markdown.
 | --- | --- | --- | --- |
 | C / C++ | clangd | clang-format (with a `.clang-format`) | `m` build, `r` run, `d` debug, `g` configure / compile_commands, `a` header/source, `T` ctest |
 | C# | csharp-ls | the server, on save | `m` build, `r` run, `d` debug, `t` test at point, `T` class, `A` all, `w` watch, `p` package |
+| OCaml | ocaml-lsp | ocamlformat (on save with a `.ocamlformat`), `dune format-dune-file` | `m` build, `c` check, `r` run, `d` debug, `t` / `T` test, `w` watch, `p` promote, `a` ml/mli, `u` utop (below) |
 | SQL | sqls (`SPC m L`), sqldiff (flymake) | by dialect, see below | the database client (below), sqldiff (`D` with file, `k` check), `t` dialect |
 | Soufflé | | | `m` check and run (errors are jumps), `r` run with facts from the file's directory |
 | Verilog, SystemVerilog | verible | verible | `m` verilator lint, `r` iverilog + vvp, `w` gtkwave, AUTOs, templates |
@@ -272,6 +273,56 @@ another dialect (`foo.tsql.sql` next to `foo.db2i.sql`) and shows the verdict
 and every behavioural difference in `*sqldiff*`: `RET` jumps to either side,
 `g` reruns, `e` opens ediff. After `SPC m f` (format), sqldiff compares before
 and after and warns if the formatter changed what the code means.
+
+## OCaml
+
+tuareg for `.ml` / `.mli` (and menhir `.mly` and opam files), dune-mode for
+dune files, ocaml-lsp through eglot: types on hover (`K`), `gd`, `grr`, `grn`,
+code actions (`gra`: add a type annotation, destruct a value into its cases,
+construct an expression for a `_` hole, extract a local or a function),
+diagnostics from the compiler at the end of the line, `]d` / `[d`. Everything runs at the **dune root** (the outermost
+`dune-workspace`, else the outermost `dune-project`, as dune finds it), so the
+paths in errors resolve and every error and warning is a jump.
+
+| `SPC m` | |
+| --- | --- |
+| `m` / `c` | `dune build` / `dune build @check` (types only, faster) |
+| `r` | `dune exec` an executable of the project (the one next to the file, else ask) |
+| `t` / `T` | tests of this directory / of everything |
+| `w` | `dune build -w`: errors stay in the buffer as you save |
+| `p` | `dune promote`: accept an expect test's output (reloads the buffers) |
+| `f` / `F` | format this buffer (ocamlformat, or `dune format-dune-file`) / `dune fmt` everywhere |
+| `a` | the other file: `.ml` / `.mli` |
+| `u u`, `u e`, `u r`, `u b` | utop: start (loading this directory's library), eval phrase / region / buffer (OCaml's own toplevel when utop is not installed) |
+| `d` | debug with ocamlearlybird (dape): builds `main.bc` first; the executable needs `(modes byte exe)` and kittymax tells you when it does not |
+| `I` / `E` | install the tools in the project's opam switch / read the opam environment again |
+
+**opam.** The tools come from the project's switch: kittymax runs
+`opam env` for the project (a local `_opam` switch when there is one), in the
+background, once, and gives the result to that project's OCaml buffers,
+commands, utop and the language server. On native Windows: `winget install
+OCaml.opam` (`install.ps1` does), `opam init` once, then `SPC m I` in an OCaml
+file installs `ocaml-lsp-server`, `ocamlformat`, `dune`, `utop` and `earlybird`.
+Under Nix the compiler, dune, ocaml-lsp, ocamlformat, utop and earlybird are in
+the wrapper as a fallback, built for one OCaml version: a language server only
+works with the compiler version it was built for, so a project's own dev shell
+comes first on PATH.
+
+ocaml-lsp needs dune's merlin configuration, which `dune build` writes. The
+first time you open a file whose directory has none, kittymax runs one
+`dune build @check` in the background and restarts the server when it is done
+(until then ocaml-lsp says "No config found").
+
+Editing: `(*` opens a comment `(* | *)`, and `'` is never paired (type variables
+`'a`). Style is imposed on save only when the project has a `.ocamlformat`;
+`SPC m f` formats anyway (ocamlformat's default profile without one).
+
+dune's output is asked for as `--display=quiet`: its progress line
+(`Done: 62% ...`) is redrawn with carriage returns, which a compilation buffer
+mishandles: every coloured error after the first progress line stayed as raw
+escape codes and no longer matched the error pattern. The same fix is in
+`kitty-core.el` for every other tool that colours its errors: escape codes
+become faces before the buffer is parsed.
 
 ## Databases (in place of SSMS)
 
@@ -469,7 +520,10 @@ kittymax/test/run.sh
 ```
 
 runs inside kittymax's own Emacs (`KITTYMAX_EMACS` for another). Among them:
-the database client against a fake backend that speaks dbbliss's protocol (and
+OCaml against the real dune (its error lines jumped to, `dune exec`, `dune test`,
+bytecode targets), the real ocamlformat, a real ocaml-lsp through eglot
+(connecting, the one real error and no more, hover) and a real utop evaluating
+a phrase, each skipped when the tool is not installed; the database client against a fake backend that speaks dbbliss's protocol (and
 a real process over a pipe), MSBuild's evaluation read back from a real
 `msbuild` and the `cl.exe` command lines clangd gets from it, dotnet's and
 cl.exe's error lines as jumps, Soufflé's errors against souffle 2.5's own

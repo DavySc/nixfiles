@@ -20,7 +20,7 @@
 ;;   kitty-markdown    the markdown editing experience
 ;;   kitty-prog        tree-sitter, eglot, formatting
 ;;   kitty-rss         elfeed: RSS and Atom feeds
-;;   lang/*            C and C++ (+ msvc: Visual Studio's compiler and MSBuild), C#,
+;;   lang/*            C and C++ (+ msvc: Visual Studio's compiler and MSBuild), C#, OCaml,
 ;;                     SQL (+ dbbliss: the database client, + sqldiff), Soufflé,
 ;;                     Verilog and SystemVerilog, Nix
 
@@ -46,8 +46,8 @@
 (kitty-load 'kitty-markdown)
 (kitty-load 'kitty-prog)
 (kitty-load 'kitty-rss)
-(dolist (lang '(kitty-msvc kitty-c kitty-csharp kitty-sql kitty-dbbliss kitty-sqldiff kitty-souffle
-                kitty-verilog kitty-nix))
+(dolist (lang '(kitty-msvc kitty-c kitty-csharp kitty-ocaml kitty-sql kitty-dbbliss kitty-sqldiff
+                kitty-souffle kitty-verilog kitty-nix))
   (kitty-load lang))
 
 ;; Machine-specific settings (git-ignored): fonts, org directory, work SQL

@@ -27,6 +27,7 @@ $packages = @(
     @{ Id = "Ninja-build.Ninja";                  What = "Ninja (CMake builds)" },
     @{ Id = "Microsoft.DotNet.SDK.10";            What = ".NET 10 SDK (C#, C# org blocks, the database client)" },
     @{ Id = "Samsung.NetCoreDbg";                 What = "netcoredbg (C# debugger)" },
+    @{ Id = "OCaml.opam";                         What = "opam (OCaml: compiler, dune, language server)" },
     @{ Id = "Microsoft.Sqlcmd";                   What = "sqlcmd (org's sql blocks with :engine mssql)" },
     @{ Id = "JohnMacFarlane.Pandoc";              What = "pandoc (Word export, markdown preview)" },
     @{ Id = "MiKTeX.MiKTeX";                      What = "MiKTeX (org: PDF export and LaTeX previews)" },
@@ -54,6 +55,18 @@ if (Get-Command dotnet -ErrorAction SilentlyContinue) {
     Write-Host "== csharp-ls" -ForegroundColor Cyan
     dotnet tool install --global csharp-ls 2>$null
     if ($LASTEXITCODE -ne 0) { dotnet tool update --global csharp-ls }
+}
+
+# OCaml: opam sets up the compiler and the tools per project ("switch").  Not done
+# here, because it takes a while and asks about the toolchain it will install:
+#   opam init                      (once; opam 2.2+ fetches the Windows toolchain itself)
+#   opam install ocaml-lsp-server ocamlformat dune utop earlybird      (or SPC m I in kittymax)
+if (Get-Command opam -ErrorAction SilentlyContinue) {
+    $switches = & opam switch list --short 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $switches) {
+        Write-Host "== OCaml: opam is installed but not set up. Run 'opam init' once in a terminal," -ForegroundColor Yellow
+        Write-Host "   then SPC m I in an OCaml file in kittymax installs the language server and tools." -ForegroundColor Yellow
+    }
 }
 
 # CodeLLDB: the debugger for C built by MSVC (it reads PDBs). Not on winget:
@@ -114,6 +127,7 @@ Write-Host "Done. Open a new terminal (so PATH is refreshed), then start kittyma
 Write-Host "desktop shortcut or with:  $launcher" -ForegroundColor Green
 Write-Host "The first start installs the Emacs packages; give it a few minutes."
 Write-Host ""
+Write-Host "OCaml: run 'opam init' once; kittymax reads each project's opam switch itself."
 Write-Host "Databases: put your connections in local.el (kitty-dbbliss-connections; see the README)."
 Write-Host "MiKTeX installs LaTeX packages on first use: allow it when it asks."
 Write-Host ""
