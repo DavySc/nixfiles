@@ -30,7 +30,7 @@
     ;; dired
     dirvish diredfl
     ;; org
-    org-modern org-appear toc-org ox-gfm org-download
+    org-modern org-appear toc-org ox-gfm org-download org-roam htmlize
     ;; markdown
     markdown-mode markdown-toc edit-indirect olivetti valign mixed-pitch
     visual-fill-column jinx

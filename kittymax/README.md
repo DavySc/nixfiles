@@ -3,9 +3,14 @@
 An Emacs with my Neovim config's keys, for the jobs Emacs does best (org,
 magit, dired, elfeed ...) without retraining my fingers: Neovim
 ([my-nvim](https://github.com/DavySc/my-nvim)) is the main editor and the
-source of truth for every key. evil, catppuccin mocha, built for NixOS, fast to
-start, and good at the things I write: org, markdown, C, C++, C#, SQL, Verilog
-/ SystemVerilog, Nix.
+source of truth for every key. evil, catppuccin mocha, built for NixOS and
+native Windows, fast to start, and good at the things I write: org, markdown,
+C, C++, C#, SQL, Soufflé, Verilog / SystemVerilog, Nix.
+
+On my Windows work machine it stands in for two heavy programs: **SQL Server
+Management Studio** ([Databases](#databases-in-place-of-ssms)) and **Visual
+Studio** for C and C# ([C and C#](#c-and-c-in-place-of-visual-studio)), at a
+fraction of their memory, with the same keys as everything else.
 
 ```
 early-init.el        before the first frame: GC off, no flash, package-quickstart
@@ -22,10 +27,12 @@ lisp/kitty-completion vertico orderless marginalia consult embark corfu cape
 lisp/kitty-vc        magit, diff-hl
 lisp/kitty-dired     dired + dirvish
 lisp/kitty-org       org-mode
+lisp/kitty-org-tools clocking, habits, export (HTML, PDF, Word), babel, org-roam
+lisp/kitty-ob-csharp C# org blocks through .NET 10's file-based apps
 lisp/kitty-markdown  the markdown editing experience
 lisp/kitty-prog      tree-sitter, eglot (+ emacs-lsp-booster), flymake, apheleia
 lisp/kitty-rss       elfeed: RSS and Atom feeds
-lisp/lang/           c, csharp, sql (+ sqldiff), verilog, nix
+lisp/lang/           c (+ msvc), csharp, sql (+ dbbliss, sqldiff), souffle, verilog, nix
 package.nix          Emacs with all packages + language servers + tools = `kittymax`
 windows/             kittymax.cmd (launcher) and install.ps1 (winget) for native Windows
 test/                ERT tests (test/run.sh)
@@ -57,9 +64,14 @@ packages from ELPA and MELPA on the first start (a few minutes, once), into
    powershell -ExecutionPolicy Bypass -File windows\install.ps1
    ```
 
-   It installs Emacs, git, ripgrep, fd, clangd + clang-format (LLVM), the .NET
-   SDK, pandoc and the JetBrainsMono Nerd Font, `csharp-ls` as a dotnet tool,
-   and puts a `kittymax` shortcut on the desktop. Or install those yourself.
+   It installs Emacs, git, ripgrep, fd, clangd + clang-format + clang (LLVM),
+   CMake, Ninja, the .NET 10 SDK, netcoredbg, sqlcmd, pandoc, MiKTeX and the
+   JetBrainsMono Nerd Font (every winget id checked against winget-pkgs), then
+   `csharp-ls` as a dotnet tool, CodeLLDB (the C debugger) from its release,
+   and the database client's backend (unless Neovim built it already), and
+   puts a `kittymax` shortcut on the desktop. Or install those yourself.
+   Visual Studio is not installed: its compiler and MSBuild are used when they
+   are there (or the smaller Build Tools for Visual Studio).
 3. Start it with the shortcut or `windows\kittymax.cmd [file]`. That is
    `emacs --init-directory <checkout>\kittymax`.
 
@@ -74,9 +86,9 @@ Different on Windows:
   on `SPC a` needs eat, so it is not there), `jinx` (spell
   checking uses flyspell if aspell/hunspell is on `PATH`), `eglot-booster`.
 - **Language servers and tools** that winget has no package for: install
-  verible, verilator and iverilog (hardware) and sqls (SQL) yourself and put
-  them on `PATH`; kittymax uses what it finds. `SPC t s` (psql) needs the
-  PostgreSQL client tools. sqldiff: install Rust (`winget install
+  verible, verilator and iverilog (hardware), sqls (SQL) and souffle (Datalog:
+  built with CMake and MSVC) yourself and put them on `PATH`; kittymax uses
+  what it finds. sqldiff: install Rust (`winget install
   Rustlang.Rustup`) and `cargo install --git https://github.com/DavySc/SQLDiff
   sqldiff-cli`, which puts `sqldiff.exe` in `%USERPROFILE%\.cargo\bin`.
   Without it the SQL lint and diff are off; T-SQL formatting wants sqlfluff
@@ -134,8 +146,9 @@ decrement is `-1 C-a`); `C-h` is Emacs's help.
 | `SPC SPC x` eval this file | `SPC m` **this mode's keys** | | |
 
 Emacs-only, on prefixes my-nvim leaves free: `SPC b` buffers, `SPC p` projects,
-`SPC s` search, `SPC n` notes, `SPC t` tools (terminal, eshell, rss, sql,
-markdown preview), `SPC i` insert, `SPC q` quit, `SPC H` help, `SPC :` M-x.
+`SPC s` search, `SPC n` notes (with org-roam's linked notes), `SPC t` tools
+(terminal, eshell, rss, `t s` connect to a database, markdown preview),
+`SPC i` insert, `SPC q` quit, `SPC H` help, `SPC :` M-x.
 
 `SPC m` changes with the mode; where my-nvim has the same keys they match:
 `SPC m m` builds (C) or lints (Verilog), `SPC m r` runs, `SPC m d` debugs,
@@ -207,9 +220,10 @@ filters. Entries are shown wrapped and centred like markdown.
 
 | | server | format | `SPC m` |
 | --- | --- | --- | --- |
-| C / C++ | clangd | clang-format (with a `.clang-format`) | `m` build, `r` run, `d` gdb, `g` configure, `a` header/source, `T` ctest |
-| C# | csharp-ls | the server, on save | `dotnet`: `m` build, `r` run, `t` test, `w` watch, `p` add package |
-| SQL | sqls (`SPC m L`), sqldiff (flymake) | by dialect, see below | connect, send, describe table, sqldiff (`D` with file, `k` check), `t` dialect |
+| C / C++ | clangd | clang-format (with a `.clang-format`) | `m` build, `r` run, `d` debug, `g` configure / compile_commands, `a` header/source, `T` ctest |
+| C# | csharp-ls | the server, on save | `m` build, `r` run, `d` debug, `t` test at point, `T` class, `A` all, `w` watch, `p` package |
+| SQL | sqls (`SPC m L`), sqldiff (flymake) | by dialect, see below | the database client (below), sqldiff (`D` with file, `k` check), `t` dialect |
+| Soufflé | | | `m` check and run (errors are jumps), `r` run with facts from the file's directory |
 | Verilog, SystemVerilog | verible | verible | `m` verilator lint, `r` iverilog + vvp, `w` gtkwave, AUTOs, templates |
 | Nix | nil | nixfmt | rebuild |
 
@@ -217,6 +231,12 @@ Verilog buffers are also linted by verilator as you type (flymake), for the
 checks a language server does not do: widths, unused and undriven signals.
 
 C# needs the .NET SDK: kittymax carries one, a project's dev shell wins.
+
+Soufflé (`.dl`) is highlighted as my-nvim's `syntax/souffle.vim` does it;
+`SPC m m` runs `souffle -F <dir> -D - file.dl` in the file's directory, as
+my-nvim's `:make`, and `RET` on a message lands on its line and on the column
+its `^` points at. `.facts` files keep their Tabs, show them, and are never
+stripped of trailing whitespace on save (a trailing Tab is an empty column).
 
 ### SQL dialects
 
@@ -250,6 +270,136 @@ and every behavioural difference in `*sqldiff*`: `RET` jumps to either side,
 `g` reruns, `e` opens ediff. After `SPC m f` (format), sqldiff compares before
 and after and warns if the formatter changed what the code means.
 
+## Databases (in place of SSMS)
+
+The database client is [dbbliss.nvim](https://github.com/DavySc/dbbliss.nvim)'s:
+kittymax talks to the same backend process my-nvim uses (a .NET program that
+holds the connections), so both editors share one build of it and its rules.
+Cancel is protocol-level and works while the server is busy; results are paged
+and never lose rows; a `prod` connection asks before any statement that can
+change data; an open transaction is never committed or rolled back behind your
+back, and quitting with one asks first.
+
+Connections go in `local.el` (git-ignored), as in my-nvim's `lua/local.lua`:
+
+```elisp
+(setq kitty-dbbliss-connections
+      '(("work" :engine "sqlserver" :env "dev"
+         :connection-string "Server=sql01;Database=App;Integrated Security=true;TrustServerCertificate=true")
+        ("prod" :engine "sqlserver" :env "prod"
+         :connection-string "Server=sql02\\PROD;Database=App;Integrated Security=true")))
+```
+
+`Integrated Security=true` is Windows authentication: no password anywhere.
+Otherwise `:password` names where one is, never the password: `(:env "NAME")`,
+`(:credman "target")` (Windows Credential Manager), `(:pass "path")`.
+
+In a SQL buffer (`SPC m`, or `:Dbbliss <command>` as in my-nvim):
+
+| | |
+| --- | --- |
+| `c` / `u` / `C` | connect / use another open connection / disconnect |
+| `e`, `C-RET` | run the statement under the cursor (SQL Server: its `GO` batch), or the selected lines |
+| `a`, `F5` | run the whole buffer (`F5` runs the selection when there is one, as in SSMS) |
+| `x` | cancel the running query |
+| `T b` / `T c` / `T r` | begin / commit / roll back |
+| `d`, `K` | object info: columns, indexes, keys in and out, triggers, definition |
+| `S` | the object's CREATE script, in a new buffer |
+| `l` | the object explorer: databases, schemas, tables, views, functions, procedures |
+| `p` / `P` | estimated plan / actual plan (run in a transaction that is rolled back) |
+| `E` | export the statement's result to CSV (the backend writes it) |
+| `s` / `R` / `M` | status / results / server messages (PRINT, RAISERROR) |
+
+A script stops at the first statement that fails, says which one, and marks
+its line (`]d`). The mode line shows the connection, `PROD`, an open
+transaction and a running query. Completion (corfu) offers the connection's
+tables and views after `FROM`, `JOIN`, `UPDATE` ..., a schema's objects after
+`schema.`, and a table's or alias's columns after `alias.`, from a cache that
+never makes you wait.
+
+The results buffer: `TAB` / `S-TAB` cell to cell, `yc` / `yr` / `yC` copy the
+cell / row / column (full values, NULL as empty), `]]` / `[[` result sets, `gm`
+or going to the end fetches the next 1000 rows of a paused query, `m`
+messages. In the explorer: `RET` opens, `i` info, `s` script, `t` selects the
+first 1000 rows (SSMS's Select Top 1000), `r` / `R` refresh, `S` system objects.
+A plan shows each operator with its cost, estimated → actual rows (with the
+factor when they are far apart), time, and the hottest node; `x` opens the
+raw plan.
+
+In org, a SQL block runs on a connection and returns its rows as a table:
+
+```org
+#+begin_src sql :dbbliss work
+select top 10 name, create_date from sys.tables order by create_date desc
+#+end_src
+```
+
+The backend: my-nvim's copy is used when Neovim has built it (`:Dbbliss
+build`); otherwise `windows\install.ps1` (or `M-x kitty-dbbliss-build`) builds
+one in kittymax's data directory. It needs the .NET 10 SDK to build, not to run.
+Not ported from dbbliss.nvim: the sessions list, backup, drop and `:Dbbliss
+ask`; my-nvim has them.
+
+## C and C# (in place of Visual Studio)
+
+**C#** (modern .NET): csharp-ls for definitions, references, rename, code
+actions and diagnostics; the solution (`.sln`, `.slnx`) or project above the
+file is what builds. `SPC m m` builds (errors once, as jumps); `r` runs the
+file's project (`C-u` picks another); `t` runs the test method under the
+cursor, `T` its class, `A` all, `l` the last run again (Test Explorer); `d`
+builds and debugs it with netcoredbg in dape (breakpoints, stepping, locals,
+the REPL: my-nvim's `SPC d` keys); `w` is `dotnet watch`; `p` adds a NuGet
+package; `s` opens a project of the solution.
+
+**C** with CMake, Make, or a Visual Studio solution, found in that order:
+
+- *CMake*: `SPC m g` configures (a preset from `CMakePresets.json`, asked once
+  per project, else `build/` with Ninja) and exports `compile_commands.json`
+  for clangd; `m` builds; `T` runs ctest.
+- *Visual Studio solutions* (`.sln` + `.vcxproj`): `m` builds with MSBuild;
+  `g` writes `compile_commands.json` from MSBuild's own evaluation of each
+  project (include paths, defines, C standard, forced includes, property
+  sheets: nothing is built), so clangd sees what the compiler sees. Run it
+  again after changing project settings. `M-x kitty-msvc-refresh-env` after a
+  Visual Studio update.
+- *One file*: `m` compiles it alone with gcc, clang or cl (the first found, as
+  my-nvim does), `r` runs it.
+
+On Windows the MSVC environment (`cl.exe`, `INCLUDE`, `LIB`: what a Developer
+Command Prompt sets) is read once from Visual Studio's `vcvarsall.bat` and
+cached, so CMake with Ninja and nmake work from Emacs. `SPC m d` debugs the
+program with CodeLLDB, which reads MSVC's PDBs: breakpoints, stepping,
+variables, call stacks. What Visual Studio's debugger does that this does not:
+edit and continue, natvis visualizers for STL types, mixed managed/native
+debugging. For those, WinDbg (`winget install Microsoft.WinDbg`) or Visual
+Studio itself, once in a while.
+
+## Org
+
+Beyond notes, tasks, capture and the agenda (`SPC o a`, `SPC o c`):
+
+- **Agenda** files are every `.org` under `~/org`, as my-nvim's `~/org/**/*`.
+- **Clocking**: `SPC o x i` / `o` / `q` / `j` (nvim-orgmode's: in, out,
+  cancel, go to), `e` effort, `r` clock table, `l` clock in last. A clock left
+  running survives restarting Emacs; the agenda's `R` shows the clock report;
+  column view (`SPC m c`) shows effort against time clocked.
+- **Habits**: a `TODO` scheduled `.+1d` with `:STYLE: habit` (capture
+  template `h`); the agenda draws its consistency graph.
+- **Export** (`SPC o e`): HTML, PDF (LaTeX: tectonic when installed, else
+  xelatex from MiKTeX or TeX Live), and Word (`w`: org's own export, so
+  babel results, macros and includes are in it, then pandoc;
+  `~/org/reference.docx` styles it when there is one).
+- **Babel**: C and C++ (gcc, else clang), C# (.NET 10's file-based apps:
+  top-level code, `:usings`, `:package` for NuGet; each block is compiled
+  once, so running it again takes a fraction of a second), SQL Server through
+  the database client (`:dbbliss work`, or `:engine mssql` through sqlcmd with
+  Windows authentication), shell, Python, Emacs Lisp, Graphviz.
+- **LaTeX** fragments preview with `SPC m L` (dvipng from MiKTeX / TeX Live,
+  else tectonic and ImageMagick).
+- **Linked notes** (org-roam, in `~/org/roam`): `SPC n r` find or create a
+  note, `n i` insert a link to one, `n b` backlinks, `n c` capture, `n d t` /
+  `y` / `d` today's, yesterday's or a date's daily note.
+
 ## Why it starts fast
 
 - Garbage collection is off until startup ends, then gcmh keeps it high while
@@ -269,6 +419,39 @@ and after and warns if the formatter changed what the code means.
 
 `SPC H s` prints what startup cost, module by module.
 
+## Fast as you type
+
+Startup is one thing; every keystroke is another. What a key costs, measured
+in a real terminal with a full redraw after each key, files of 1,400–2,000
+lines:
+
+| | `j` | `k` | `w` | `C-d` | `C-u` | insert + escape |
+| --- | --- | --- | --- | --- | --- | --- |
+| C | 4.3 ms | 2.8 ms | 2.2 ms | 3.1 ms | 2.8 ms | 5.5 ms |
+| SQL | 4.1 ms | 3.0 ms | 1.9 ms | 3.0 ms | 3.7 ms | 2.6 ms |
+| org | 4.5 ms | 2.7 ms | 1.7 ms | 2.9 ms | 2.7 ms | 2.7 ms |
+| Emacs Lisp | 2.7 ms | 2.1 ms | 1.6 ms | 2.3 ms | 3.6 ms | 2.5 ms |
+
+All of it well inside one frame (16 ms at 60 Hz). Relative line numbers (for
+`5j`) cost under a millisecond of that. Two things that were slow are gone:
+
+- **Diagnostics at the end of the line** are drawn by kittymax, not by
+  flymake. Flymake's own way (text on each line's newline) made every `j` / `k`
+  take 50–390 ms in a file with many diagnostics; now it is 2–5 ms with 2,000.
+- **checkdoc** (docstring advice for Emacs Lisp) no longer runs: it linted the
+  whole buffer in Emacs itself after each pause in typing, 400 ms on a big file.
+
+`test/kitty-perf-test.el` keeps it so: it boots the whole configuration, opens
+a file in each language and types into it, and fails when something new runs
+on every keystroke (pre- and post-command hooks are checked against a reviewed
+list) or when a motion or an edit goes over its budget.
+
+Emacs 31 runs flymake checkers only in "trusted" files unless a checker says
+it is safe, and none does: out of the box C#, C, SQL and Verilog files would
+get no diagnostics at all. kittymax marks its checkers safe (eglot, sqldiff,
+verilator: none of them runs the file's code) and trusts its own directory
+for the Emacs Lisp byte-compiler, which can.
+
 ## When something breaks
 
 A module that fails to load, or a hook function that raises an error, is
@@ -282,7 +465,14 @@ mode hook switches off syntax highlighting for every buffer of that mode.
 kittymax/test/run.sh
 ```
 
-runs inside kittymax's own Emacs (`KITTYMAX_EMACS` for another): every my-nvim
+runs inside kittymax's own Emacs (`KITTYMAX_EMACS` for another). Among them:
+the database client against a fake backend that speaks dbbliss's protocol (and
+a real process over a pipe), MSBuild's evaluation read back from a real
+`msbuild` and the `cl.exe` command lines clangd gets from it, dotnet's and
+cl.exe's error lines as jumps, Soufflé's errors against souffle 2.5's own
+output, org's clock, habits in the agenda, Word export read back through
+pandoc, C and C# blocks really run, org-roam's links in its database, and the
+keystroke budgets above. Also: every my-nvim
 leader key against the command it should run here (`kitty-keys-test.el`, with
 nvim-orgmode's and markdown's buffer-only keys, `C-a` and SQL statements), the
 markdown reveal-on-current-line behaviour, the verilator flymake backend against a fake

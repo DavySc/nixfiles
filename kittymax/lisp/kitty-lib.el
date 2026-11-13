@@ -224,6 +224,21 @@ still offers the global keys under it."
   (declare (indent 1))
   `(when (executable-find ,program) ,@body))
 
+(defun kitty-solution-projects (solution)
+  "The projects of SOLUTION (a .sln or .slnx; a project file is its own), absolute."
+  (let ((dir (file-name-directory solution)))
+    (if (string-match-p "proj\\'" solution)
+        (list solution)
+      (with-temp-buffer
+        (insert-file-contents solution)
+        (let (projects (re (if (string-suffix-p ".slnx" solution)
+                               "<Project[^>]*Path=\"\\([^\"]+\\.[a-z]+proj\\)\""
+                             "^Project(\"[^\"]*\") = \"[^\"]*\", \"\\([^\"]+\\.[a-z]+proj\\)\"")))
+          (goto-char (point-min))
+          (while (re-search-forward re nil t)
+            (push (expand-file-name (string-replace "\\" "/" (match-string 1)) dir) projects))
+          (nreverse projects))))))
+
 (defun kitty-project-root ()
   "The root of the current project, or `default-directory'."
   (or (when-let* ((p (project-current))) (project-root p))

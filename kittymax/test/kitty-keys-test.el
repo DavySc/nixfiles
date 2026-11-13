@@ -21,7 +21,7 @@
 (require 'kitty-sql)
 ;; Everything a key can name, for `kitty-keys-commands-exist'.
 (dolist (m '(kitty-core kitty-ui kitty-splash kitty-cat kitty-completion kitty-prog kitty-rss
-             kitty-c kitty-csharp kitty-nix kitty-verilog kitty-sqldiff))
+             kitty-msvc kitty-c kitty-csharp kitty-nix kitty-verilog kitty-sqldiff kitty-dbbliss kitty-souffle))
   (require m))
 
 (defun kitty-test--command (map keys)

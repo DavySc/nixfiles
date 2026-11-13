@@ -30,7 +30,7 @@
       delete-by-moving-to-trash nil)
 
 (kitty-add-hook 'dired-mode-hook #'dired-hide-details-mode)
-(kitty-add-hook 'dired-mode-hook #'diredfl-mode)
+(kitty-add-hook 'dired-mode-hook (lambda () (when (fboundp 'diredfl-mode) (diredfl-mode 1))))
 
 ;;;; dirvish
 

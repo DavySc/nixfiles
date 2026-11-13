@@ -16,10 +16,13 @@
 ;;   kitty-vc          magit, diff-hl
 ;;   kitty-dired       dirvish
 ;;   kitty-org         org-mode
+;;   kitty-org-tools   clocking, habits, export (HTML, PDF, Word), babel, org-roam
 ;;   kitty-markdown    the markdown editing experience
 ;;   kitty-prog        tree-sitter, eglot, formatting
 ;;   kitty-rss         elfeed: RSS and Atom feeds
-;;   lang/*            C and C++, C#, SQL (+ sqldiff), Verilog and SystemVerilog, Nix
+;;   lang/*            C and C++ (+ msvc: Visual Studio's compiler and MSBuild), C#,
+;;                     SQL (+ dbbliss: the database client, + sqldiff), Soufflé,
+;;                     Verilog and SystemVerilog, Nix
 
 (add-to-list 'load-path (expand-file-name "lisp" kitty-config-dir))
 (add-to-list 'load-path (expand-file-name "lisp/lang" kitty-config-dir))
@@ -39,10 +42,12 @@
 (kitty-load 'kitty-vc)
 (kitty-load 'kitty-dired)
 (kitty-load 'kitty-org)
+(kitty-load 'kitty-org-tools)
 (kitty-load 'kitty-markdown)
 (kitty-load 'kitty-prog)
 (kitty-load 'kitty-rss)
-(dolist (lang '(kitty-c kitty-csharp kitty-sql kitty-sqldiff kitty-verilog kitty-nix))
+(dolist (lang '(kitty-msvc kitty-c kitty-csharp kitty-sql kitty-dbbliss kitty-sqldiff kitty-souffle
+                kitty-verilog kitty-nix))
   (kitty-load lang))
 
 ;; Machine-specific settings (git-ignored): fonts, org directory, work SQL

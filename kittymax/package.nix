@@ -72,6 +72,8 @@ let
       toc-org
       ox-gfm
       org-download
+      org-roam # linked notes (SQLite built into Emacs)
+      htmlize # code colours in HTML export
       # markdown
       markdown-mode
       markdown-toc
@@ -121,14 +123,20 @@ let
       pgformatter
       sqlfluff
       postgresql # psql, for sql-postgres
+      # Soufflé (Datalog)
+      souffle
+      # C# debugging, C / C++ debugging through dape
+      netcoredbg
       # Verilog / SystemVerilog
       verible
       verilator
       iverilog
       gtkwave
-      # Markdown, org
+      # Markdown, org (pandoc: Word export; tectonic + imagemagick: PDF and LaTeX previews)
       marksman
       pandoc
+      tectonic
+      imagemagick
       prettier
       hunspell
       hunspellDicts.en_US

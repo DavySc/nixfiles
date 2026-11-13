@@ -77,12 +77,80 @@
 ;;;; flymake: diagnostics at the end of the line
 
 (setq flymake-no-changes-timeout 0.6
-      flymake-show-diagnostics-at-end-of-line 'short
+      ;; drawn by kittymax instead: see below
+      flymake-show-diagnostics-at-end-of-line nil
       flymake-indicator-type 'margins
       flymake-margin-indicators-string
       '((error "●" compilation-error) (warning "●" compilation-warning)
         (note "●" compilation-info)))
 (kitty-add-hook 'prog-mode-hook #'flymake-mode)
+;; Emacs 31's flymake runs a checker only in `trusted-content' files, unless
+;; the checker is marked safe; none is, out of the box, so C#, C, SQL and
+;; Verilog files would get no diagnostics at all.  These checkers do not run
+;; the file's code (eglot relays the language server's findings, sqldiff
+;; parses, verilator lints, dbbliss shows a query's error), so they are safe.
+;; The Emacs Lisp byte-compiler can run macros: it checks only kittymax itself.
+(dolist (backend '(eglot-flymake-backend kitty-sqldiff-flymake kitty-verilog-flymake kitty-dbbliss-flymake))
+  (put backend 'flymake-always-safe t))
+(unless (eq trusted-content :all)
+  (add-to-list 'trusted-content (abbreviate-file-name (file-name-as-directory kitty-config-dir))))
+
+;; Diagnostics at the end of their line, as my-nvim's virtual text.
+;;
+;; Flymake's own `flymake-show-diagnostics-at-end-of-line' puts the text on
+;; each line's newline as a display property, and moving past many of those
+;; is slow: with 2000 diagnostics every j / k took 160-390 ms (Emacs 31.1,
+;; even with emacs -Q).  The same text as an after-string costs nothing to
+;; move past, so kittymax draws it that way, once per flymake report, with
+;; nothing to do on each keystroke.
+
+(declare-function flymake-diagnostics "flymake")
+(declare-function flymake-diagnostic-beg "flymake")
+(declare-function flymake-diagnostic-type "flymake")
+(declare-function flymake-diagnostic-oneliner "flymake")
+
+(defvar-local kitty--flymake-eol-overlays nil)
+
+(defun kitty--flymake-category (type)
+  (or (get type 'flymake-category) type))
+
+(defun kitty--flymake-severity (diag)
+  (or (get (kitty--flymake-category (flymake-diagnostic-type diag)) 'severity) 0))
+
+(defun kitty-flymake-eol-refresh ()
+  "Draw this buffer's diagnostics at the ends of their lines (the worst first)."
+  (mapc #'delete-overlay kitty--flymake-eol-overlays)
+  (setq kitty--flymake-eol-overlays nil)
+  (when (bound-and-true-p flymake-mode)
+    (let ((by-line (make-hash-table)))
+      (save-excursion
+        (save-restriction
+          (widen)
+          (dolist (d (flymake-diagnostics))
+            (goto-char (flymake-diagnostic-beg d))
+            (push d (gethash (line-end-position) by-line)))))
+      (maphash
+       (lambda (eol diags)
+         (let* ((diags (sort diags (lambda (a b) (> (kitty--flymake-severity a) (kitty--flymake-severity b)))))
+                (top (car diags))
+                (face (or (get (kitty--flymake-category (flymake-diagnostic-type top)) 'eol-face) 'shadow))
+                (text (concat "  "
+                              (propertize (flymake-diagnostic-oneliner top t) 'face face)
+                              (if (cdr diags)
+                                  (propertize (format " and %d more" (1- (length diags))) 'face 'shadow)
+                                "")))
+                ;; both ends advance: typing at the end of the line keeps it after the text
+                (ov (make-overlay eol eol nil t t)))
+           (put-text-property 0 1 'cursor t text)
+           (overlay-put ov 'after-string text)
+           (overlay-put ov 'kitty-flymake-eol t)
+           (push ov kitty--flymake-eol-overlays)))
+       by-line))))
+
+(defun kitty--flymake-eol-after-report (&rest _)
+  (kitty-flymake-eol-refresh))
+(advice-add 'flymake--handle-report :after #'kitty--flymake-eol-after-report)
+(kitty-add-hook 'flymake-mode-hook #'kitty-flymake-eol-refresh)
 (define-key mode-specific-map (kbd "e") '("next error" . flymake-goto-next-error))
 
 ;;;; Formatting
@@ -91,7 +159,7 @@
   "Modes that are only formatted on request.")
 
 (defun kitty--apheleia-on ()
-  (unless (derived-mode-p kitty-no-format-on-save-modes)
+  (unless (or (derived-mode-p kitty-no-format-on-save-modes) (not (fboundp 'apheleia-mode)))
     (apheleia-mode 1)))
 (kitty-add-hook 'prog-mode-hook #'kitty--apheleia-on)
 
@@ -135,6 +203,14 @@ Buffer-local entries let a mode check what the formatter did (kitty-sqldiff).")
     "l" '("line" . avy-goto-line)))
 
 (kitty-add-hook 'emacs-lisp-mode-hook (lambda () (when (fboundp 'puni-mode) (puni-mode 1))))
+
+;; Emacs Lisp: checkdoc's docstring advice runs in Emacs itself, on the whole
+;; buffer, each time you stop typing (400 ms on a 2000-function file, input
+;; blocked).  The byte-compiler's check runs in a separate process and stays.
+(declare-function elisp-flymake-checkdoc "elisp-mode")
+(defun kitty--elisp-no-checkdoc ()
+  (remove-hook 'flymake-diagnostic-functions #'elisp-flymake-checkdoc t))
+(kitty-add-hook 'emacs-lisp-mode-hook #'kitty--elisp-no-checkdoc)
 
 (provide 'kitty-prog)
 ;;; kitty-prog.el ends here
