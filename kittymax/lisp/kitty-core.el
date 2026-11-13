@@ -44,8 +44,10 @@
                     gc-cons-percentage 0.1))))
 
 ;; Language servers talk a lot: the default 4k read size is far too small.
+;; Adaptive buffering waits after short reads to gather more: added latency
+;; for every small reply (completion, hover, a query's rows).
 (setq read-process-output-max (* 4 1024 1024)
-      process-adaptive-read-buffering t)
+      process-adaptive-read-buffering nil)
 
 ;; Windows: asking the file system for every file's attributes, and the default
 ;; pipe buffering, are the slow parts of Emacs there (git, LSP, ripgrep).

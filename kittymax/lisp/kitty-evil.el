@@ -541,7 +541,7 @@ ARGS are extra command-line arguments, such as \"--continue\"."
          "e" '("eshell" . eshell)
          "r" '("rss" . kitty-rss)
          "R" '("rss feeds" . kitty-rss-edit-feeds)
-         "s" '("sql" . kitty-sql-connect)
+         "s" '("database: connect" . kitty-dbbliss-connect)
          "m" '("markdown preview" . kitty-markdown-preview)
          "d" '("dirvish" . dirvish))
 

@@ -5,26 +5,22 @@
 ;; sql-mode for three dialects: T-SQL (SQL Server), PostgreSQL and Db2 for i.
 ;; A buffer's dialect is never guessed from its contents.  It is, in order:
 ;;
-;;   1. `kitty-sql-dialect', from .dir-locals.el or a file-local variable:
+;;   1. the engine of the database connection the buffer runs on
+;;      (kitty-dbbliss: SQL Server is tsql, PostgreSQL postgres), as in my-nvim
+;;   2. `kitty-sql-dialect', from .dir-locals.el or a file-local variable:
 ;;        ((sql-mode . ((kitty-sql-dialect . tsql))))
-;;   2. the file name: foo.tsql.sql, foo.pg.sql, foo.db2i.sql (and .pgsql ...)
-;;   3. `kitty-sql-default-dialect' (nil: not known)
+;;   3. the file name: foo.tsql.sql, foo.pg.sql, foo.db2i.sql (and .pgsql ...)
+;;   4. `kitty-sql-default-dialect' (nil: not known)
 ;;
 ;; The dialect picks the highlighting (`sql-product'), the formatter (pg_format
 ;; for PostgreSQL, sqlfluff for T-SQL, none for Db2 for i or an unknown
 ;; dialect: nothing is reformatted that a formatter would mangle) and what
 ;; sqldiff checks (kitty-sqldiff).  SPC m t sets it.
 ;;
-;; sql-indent indents and aligns, and the built-in SQLi buffer runs queries:
-;; send the paragraph, region or buffer from SPC m.  Connections are data:
-;;
-;;   ;; local.el
-;;   (setq sql-connection-alist
-;;         '((dev  (sql-product 'postgres) (sql-server "localhost")
-;;                 (sql-port 5432) (sql-user "me") (sql-database "app"))))
-;;
-;; Passwords stay out of it: ~/.pgpass, as psql expects.  sqls (the language
-;; server) is started on request with SPC m L, since it needs its own config.
+;; sql-indent indents and aligns.  Queries run through kitty-dbbliss (the
+;; SQL Server / PostgreSQL client my-nvim uses too): its keys are under SPC m
+;; as well.  sqls (the language server) is started on request with SPC m L,
+;; since it needs its own config.
 
 ;;; Code:
 
@@ -71,9 +67,16 @@ does not lint them.  Set it in local.el, e.g. to `postgres'.")
            (tag (if (equal last "sql") (car (last parts 2)) last)))
       (and tag (cdr (assoc tag kitty-sql-dialect-names))))))
 
+(declare-function kitty-dbbliss-engine "kitty-dbbliss")
+
 (defun kitty-sql-dialect ()
-  "This buffer's dialect (see `kitty-sql-dialect'), or nil if it is not known."
-  (or (and (memq kitty-sql-dialect kitty-sql-dialects) kitty-sql-dialect)
+  "This buffer's dialect, or nil if it is not known.
+The engine of its database connection, else `kitty-sql-dialect', else
+the file name, else `kitty-sql-default-dialect'."
+  (or (pcase (and (fboundp 'kitty-dbbliss-engine) (kitty-dbbliss-engine))
+        ("sqlserver" 'tsql)
+        ("postgres" 'postgres))
+      (and (memq kitty-sql-dialect kitty-sql-dialects) kitty-sql-dialect)
       (kitty-sql-dialect-from-file-name buffer-file-name)
       kitty-sql-default-dialect))
 
@@ -128,44 +131,22 @@ does not lint them.  Set it in local.el, e.g. to `postgres'.")
 (with-eval-after-load 'sql-indent
   (setq sqlind-basic-offset 4))
 
-(defun kitty-sql-connect ()
-  "Connect to one of `sql-connection-alist' (or ask for a product)."
-  (interactive)
-  (if sql-connection-alist
-      (call-interactively #'sql-connect)
-    (call-interactively #'sql-product-interactive)))
-
 (defun kitty-sql-eglot ()
   "Start the sqls language server for this buffer."
   (interactive)
   (call-interactively #'eglot))
 
-(defun kitty-sql-send-dwim ()
-  "Send the region, else the paragraph at point, to the SQLi buffer."
-  (interactive)
-  (if (use-region-p)
-      (sql-send-region (region-beginning) (region-end))
-    (sql-send-paragraph)))
-
 (kitty-local-leader 'sql-mode
-  "c" '("connect" . kitty-sql-connect)
-  "s" '("set SQLi buffer" . sql-set-sqli-buffer)
-  "e" '("send paragraph / region" . kitty-sql-send-dwim)
-  "r" '("send region" . sql-send-region)
-  "b" '("send buffer" . sql-send-buffer)
-  "l" '("list tables" . sql-list-all)
-  "d" '("describe table" . sql-list-table)
   "f" '("format" . kitty-format)
   "t" '("set dialect" . kitty-sql-set-dialect)
-  "L" '("language server" . kitty-sql-eglot)
-  "i" '("show SQLi" . sql-show-sqli-buffer))
+  "L" '("language server" . kitty-sql-eglot))
 
 ;;;; Statements as text objects, as in my-nvim (config/sql_statements.lua)
 ;;
 ;;   iq / aq   inside / around the statement: yaq copies it, daq deletes it
 ;;   ]] / [[   next / previous statement
 ;;   gq{motion}  format through the dialect's formatter: gqaq one statement
-;;   K         describe the table under the cursor when connected, else hover
+;;   K         object info when the buffer has a connection, else hover
 ;;
 ;; Statements end at ;, blank lines and T-SQL GO lines, never inside strings or
 ;; comments.
@@ -250,11 +231,13 @@ and the rest of its line, for the `a' object."
             (user-error "%s: %s" (car cmd) (with-current-buffer out (string-trim (buffer-string)))))
         (kill-buffer out)))))
 
+(declare-function kitty-dbbliss-info "kitty-dbbliss")
+
 (defun kitty-sql-lookup ()
-  "K: describe the table under the cursor when connected, else the server's hover."
+  "K: object info when the buffer has a connection (my-nvim's K), else hover."
   (interactive)
-  (if (and (boundp 'sql-buffer) (buffer-live-p (get-buffer (or sql-buffer ""))))
-      (sql-list-table (thing-at-point 'symbol t))
+  (if (and (fboundp 'kitty-dbbliss-engine) (kitty-dbbliss-engine))
+      (kitty-dbbliss-info)
     (kitty-lookup)))
 
 (defun kitty--sql-evil-setup ()

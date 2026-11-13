@@ -131,8 +131,11 @@
 
 (setq yas-snippet-dirs (list (expand-file-name "snippets" kitty-config-dir))
       yas-verbosity 0)
+(defun kitty--yas-on ()
+  "Snippets in this buffer, when yasnippet is installed."
+  (when (fboundp 'yas-minor-mode-on) (yas-minor-mode-on)))
 (dolist (hook '(prog-mode-hook text-mode-hook))
-  (kitty-add-hook hook #'yas-minor-mode-on))
+  (kitty-add-hook hook #'kitty--yas-on))
 
 ;;;; Undo
 

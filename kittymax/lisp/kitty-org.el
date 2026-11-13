@@ -5,8 +5,9 @@
 ;; Org for notes, tasks and literate documents: a readable, modernised
 ;; display (org-modern), emphasis markers that appear only under the cursor
 ;; (org-appear), capture templates, an agenda, and babel for the languages
-;; this configuration is about (C, SQL, shell, Emacs Lisp).  Notes live in
-;; `org-directory' (~/org); set it in local.el to move them.
+;; this configuration is about (C, C#, SQL, shell, Emacs Lisp).  Notes live in
+;; `org-directory' (~/org); set it in local.el to move them.  Clocking,
+;; habits, export, LaTeX previews and org-roam: kitty-org-tools.el.
 
 ;;; Code:
 
@@ -52,9 +53,9 @@
       org-refile-use-outline-path 'file
       org-outline-path-complete-in-steps nil
       org-refile-targets '((org-agenda-files :maxlevel . 3))
-      ;; agenda
-      org-agenda-files (list (kitty-org-file "inbox.org") (kitty-org-file "projects.org")
-                             (kitty-org-file "journal.org"))
+      ;; agenda: every .org under org-directory, read when the agenda opens
+      ;; (kitty-org-tools.el), as my-nvim's ~/org/**/*
+      org-agenda-files (list org-directory)
       org-agenda-window-setup 'current-window
       org-agenda-start-with-log-mode t
       org-agenda-skip-deadline-if-done t
@@ -65,9 +66,9 @@
 
 (setq org-capture-templates
       `(("t" "Task" entry (file ,(kitty-org-file "inbox.org"))
-         "* TODO %?\n  %i\n  %a")
+         "* TODO %?\n  %u\n  %a")
         ("n" "Note" entry (file ,(kitty-org-file "inbox.org"))
-         "* %?\n  %U\n  %i")
+         "* %?\n  %U")
         ("j" "Journal" entry (file+olp+datetree ,(kitty-org-file "journal.org"))
          "* %<%H:%M> %?\n")))
 
@@ -76,11 +77,14 @@
 (with-eval-after-load 'org
   (org-babel-do-load-languages
    'org-babel-load-languages
-   '((emacs-lisp . t) (shell . t) (C . t) (sql . t) (python . t) (dot . t)))
+   '((emacs-lisp . t) (shell . t) (C . t) (sql . t) (python . t) (dot . t) (csharp . t)))
+  ;; C# through .NET 10's file-based apps, cached: replaces org's ob-csharp's runner
+  (require 'kitty-ob-csharp)
   (add-to-list 'org-structure-template-alist '("el" . "src emacs-lisp"))
   (add-to-list 'org-structure-template-alist '("sh" . "src shell"))
   (add-to-list 'org-structure-template-alist '("sql" . "src sql"))
   (add-to-list 'org-structure-template-alist '("c" . "src C"))
+  (add-to-list 'org-structure-template-alist '("cs" . "src csharp"))
   (add-to-list 'org-structure-template-alist '("v" . "src verilog")))
 
 ;;;; Looks
@@ -109,8 +113,11 @@
       org-appear-autosubmarkers t
       org-appear-autoentities t)
 
+(defun kitty--org-modern-agenda ()
+  "org-modern's agenda look, when org-modern is installed."
+  (when (fboundp 'org-modern-agenda) (org-modern-agenda)))
 (with-eval-after-load 'org-agenda
-  (add-hook 'org-agenda-finalize-hook #'org-modern-agenda))
+  (add-hook 'org-agenda-finalize-hook #'kitty--org-modern-agenda))
 
 ;;;; Commands referred to from the SPC tree
 

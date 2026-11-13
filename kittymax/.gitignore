@@ -12,3 +12,5 @@ local.el
 /package-quickstart.el*
 /url/
 /tramp
+/places.eld
+/undo-fu-session/

@@ -33,7 +33,7 @@
     (should-not warnings)
     (dolist (m '(kitty-core kitty-ui kitty-splash kitty-cat kitty-evil kitty-vim kitty-completion kitty-vc
                  kitty-dired kitty-org kitty-markdown kitty-prog kitty-rss kitty-c kitty-csharp
-                 kitty-sql kitty-sqldiff kitty-verilog kitty-nix))
+                 kitty-msvc kitty-sql kitty-dbbliss kitty-sqldiff kitty-souffle kitty-verilog kitty-nix))
       (should (assq m kitty--load-times))
       (should (featurep m)))))
 
@@ -42,7 +42,7 @@
   (unless (featurep 'kitty-core) (kitty-test--boot))
   (dolist (m '(kitty-core kitty-ui kitty-splash kitty-cat kitty-evil kitty-vim kitty-completion kitty-vc
                kitty-dired kitty-org kitty-markdown kitty-prog kitty-rss kitty-c kitty-csharp
-               kitty-sql kitty-sqldiff kitty-verilog kitty-nix))
+               kitty-msvc kitty-sql kitty-dbbliss kitty-sqldiff kitty-souffle kitty-verilog kitty-nix))
     (should (file-exists-p (expand-file-name (format "elc/%s.elc" m) kitty-cache-dir)))))
 
 (ert-deftest kitty-smoke-leader-tree ()
@@ -51,7 +51,7 @@
   (dolist (probe '(("f f" . kitty-find-files) ("f g" . consult-ripgrep) ("," . consult-buffer)
                    ("g g" . magit-status) ("h s" . kitty-hunk-stage) ("x x" . flymake-show-project-diagnostics)
                    ("c a" . eglot-code-actions) ("r n" . eglot-rename) ("u k" . kitty-cat-mode)
-                   ("o a" . org-agenda) ("p v" . kitty-oil) ("t r" . kitty-rss)
+                   ("o a" . org-agenda) ("p v" . kitty-oil) ("t r" . kitty-rss) ("t s" . kitty-dbbliss-connect)
                    ("SPC x" . kitty-source-file)))
     (let ((b (lookup-key kitty-leader-map (kbd (car probe)))))
       (should (eq (cdr probe) (if (consp b) (cdr b) b))))))
@@ -66,7 +66,13 @@
                    (c-ts-mode "d" kitty-c-debug)
                    (c-ts-mode "a" ff-find-other-file)
                    (csharp-ts-mode "m" kitty-csharp-build)
-                   (sql-mode "e" kitty-sql-send-dwim)
+                   (csharp-ts-mode "t" kitty-csharp-test-at-point)
+                   (csharp-ts-mode "d" kitty-csharp-debug)
+                   (souffle-mode "m" kitty-souffle-make)
+                   (souffle-mode "r" kitty-souffle-run)
+                   (sql-mode "e" kitty-dbbliss-exec)
+                   (sql-mode "l" kitty-dbbliss-tree)
+                   (sql-mode "T c" kitty-dbbliss-commit)
                    (sql-mode "t" kitty-sql-set-dialect)
                    (sql-mode "D" kitty-sqldiff-diff)
                    (verilog-mode "m" kitty-verilog-lint)
