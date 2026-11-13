@@ -40,7 +40,14 @@
 (setq csharp-ts-mode-indent-offset 4)
 
 (add-to-list 'auto-mode-alist '("\\.\\(csproj\\|fsproj\\|vcxproj\\|props\\|targets\\|slnx\\)\\'" . nxml-mode))
-(add-to-list 'auto-mode-alist '("\\.cs\\'" . csharp-ts-mode))
+(defun kitty-csharp-auto-mode ()
+  "csharp-ts-mode when the C# grammar is installed, else the classic csharp-mode.
+\(Emacs 31's csharp-ts-mode fails without the grammar, leaving the file in
+fundamental-mode.)"
+  (if (and (fboundp 'treesit-language-available-p) (treesit-language-available-p 'c-sharp))
+      (csharp-ts-mode)
+    (csharp-mode)))
+(add-to-list 'auto-mode-alist '("\\.cs\\'" . kitty-csharp-auto-mode))
 
 (defun kitty--csharp-setup ()
   (kitty-eglot-ensure-for "csharp-ls")

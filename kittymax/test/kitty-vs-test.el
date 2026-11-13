@@ -268,5 +268,61 @@ public class MathTests
         (with-temp-file (expand-file-name "CMakeLists.txt" dir) (insert "project(x)\n"))
         (should (eq 'cmake (kitty-c--build-system)))))))
 
+;;;; Tree-sitter grammars on Windows
+
+(require 'kitty-prog)
+
+(ert-deftest kitty-vs-grammars-build-with-clang-on-windows ()
+  "No cc on Windows: grammars build with clang, without the -fPIC it refuses there."
+  (cl-letf (((symbol-function 'executable-find) (lambda (p &rest _) (member p '("clang" "clang++" "git")))))
+    (let ((system-type 'windows-nt))
+      (should (equal '("clang" "-c" "-I." "parser.c")
+                     (kitty-treesit-compile-args "cc" '("-fPIC" "-c" "-I." "parser.c"))))
+      (should (equal '("clang++" "-shared" "a.o" "-o" "libtree-sitter-x.dll")
+                     (kitty-treesit-compile-args "c++" '("-fPIC" "-shared" "a.o" "-o" "libtree-sitter-x.dll"))))
+      ;; git and other programs are left alone
+      (should (equal '("git" "clone" "-fPIC") (kitty-treesit-compile-args "git" '("clone" "-fPIC"))))
+      (should (equal "clang" (kitty-treesit-compiler))))
+    ;; elsewhere clang keeps -fPIC
+    (let ((system-type 'gnu/linux))
+      (should (equal '("clang" "-fPIC" "-c") (kitty-treesit-compile-args "cc" '("-fPIC" "-c"))))))
+  ;; a cc that exists is used as it is
+  (cl-letf (((symbol-function 'executable-find) (lambda (&rest _) t)))
+    (let ((system-type 'windows-nt))
+      (should (equal '("cc" "-fPIC" "-c") (kitty-treesit-compile-args "cc" '("-fPIC" "-c")))))))
+
+(ert-deftest kitty-vs-grammar-compile-goes-through-kittymax ()
+  "treesit's own compile step runs through the rewrite (a real compile here)."
+  (require 'treesit)
+  (skip-unless (and (fboundp 'treesit--call-process-signal) (executable-find "clang")))
+  (let ((dir (kvt--tree '(("parser.c" . "int tree_sitter_x(void) { return 1; }\n"))))
+        (real (symbol-function 'executable-find)))
+    (cl-letf (((symbol-function 'executable-find)
+               (lambda (p &rest r) (and (not (member p '("cc" "c++"))) (apply real p r)))))
+      (with-temp-buffer
+        (let ((default-directory dir))
+          (treesit--call-process-signal "cc" nil t nil "-fPIC" "-c" "-I." "parser.c")
+          (should (file-exists-p (expand-file-name "parser.o" dir))))))))
+
+(ert-deftest kitty-vs-grammars-go-to-the-data-directory ()
+  "Grammars are built into the data directory and loaded from there, not the checkout."
+  (cl-letf (((symbol-function 'kitty-nix-p) (lambda (&rest _) nil)))
+    (should (equal (list 'c-sharp kitty-treesit-dir) (kitty--treesit-out-dir '(c-sharp))))
+    (should (equal '(c "/x/") (kitty--treesit-out-dir '(c "/x/")))))
+  (should (string-prefix-p (file-name-as-directory kitty-data-dir) kitty-treesit-dir)))
+
+(ert-deftest kitty-vs-no-compiler-no-grammar-prompts ()
+  "With no C compiler, Emacs does not offer grammar builds that can only fail."
+  (cl-letf (((symbol-function 'executable-find) (lambda (&rest _) nil)))
+    (should-not (kitty-treesit-compiler))))
+
+(ert-deftest kitty-vs-csharp-mode-without-grammar ()
+  "A .cs file opens in csharp-mode when the C# grammar is missing (not fundamental-mode)."
+  (cl-letf (((symbol-function 'treesit-language-available-p) (lambda (&rest _) nil)))
+    (with-temp-buffer
+      (kitty-csharp-auto-mode)
+      (should (eq major-mode 'csharp-mode))))
+  (should (eq 'kitty-csharp-auto-mode (assoc-default "x/Program.cs" auto-mode-alist #'string-match))))
+
 (provide 'kitty-vs-test)
 ;;; kitty-vs-test.el ends here

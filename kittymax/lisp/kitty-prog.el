@@ -13,11 +13,57 @@
 
 ;;;; Tree-sitter
 
-;; Under Nix the grammars are provided; elsewhere treesit-auto offers to build
-;; the one a file needs (it needs a C compiler), and until then the classic
-;; mode is used.
+;; Under Nix the grammars are provided.  Elsewhere Emacs offers to build the
+;; one a file needs, and until then the classic mode is used.  Building needs
+;; a C compiler: Emacs looks for cc, gcc or c99, which native Windows has
+;; none of; there kittymax builds with clang (LLVM, from windows/install.ps1)
+;; in the MSVC environment, without the -fPIC clang refuses for Windows.
+;; With no compiler at all nothing is offered (no prompt that can only fail).
+
+(defun kitty-treesit-compiler ()
+  "The C compiler grammars are built with, or nil when there is none."
+  (seq-find #'executable-find '("cc" "gcc" "c99" "clang")))
+
 (setq treesit-font-lock-level 4
-      treesit-auto-install (if (kitty-nix-p) nil 'prompt))
+      treesit-auto-install (cond ((kitty-nix-p) nil)
+                                 ((kitty-treesit-compiler) 'prompt))
+      treesit-auto-install-grammar (if (and (not (kitty-nix-p)) (kitty-treesit-compiler)) 'ask 'never))
+
+(defun kitty-treesit-compile-args (program args)
+  "(PROGRAM . ARGS) as kittymax runs them to build a grammar.
+cc and c++ become clang and clang++ when only those exist; on Windows
+clang refuses -fPIC (every DLL is position-independent there), so it goes."
+  (let ((program (if (and (member program '("cc" "c++")) (not (executable-find program)))
+                     (let ((clang (if (equal program "cc") "clang" "clang++")))
+                       (if (executable-find clang) clang program))
+                   program)))
+    (cons program
+          (if (and (eq system-type 'windows-nt) (member (file-name-base program) '("clang" "clang++")))
+              (remove "-fPIC" args)
+            args))))
+
+(defun kitty--treesit-call-process (orig program infile destination display &rest args)
+  (let ((pa (kitty-treesit-compile-args program args)))
+    (apply orig (car pa) infile destination display (cdr pa))))
+(advice-add 'treesit--call-process-signal :around #'kitty--treesit-call-process)
+
+;; Built grammars go to the data directory, not into this checkout.
+(defvar kitty-treesit-dir (expand-file-name "tree-sitter/" kitty-data-dir)
+  "Where grammars built here are kept (and loaded from).")
+(unless (kitty-nix-p)
+  (add-to-list 'treesit-extra-load-path kitty-treesit-dir))
+
+(defun kitty--treesit-out-dir (args)
+  "ARGS of `treesit-install-language-grammar', the directory defaulted to ours."
+  (if (or (kitty-nix-p) (nth 1 args)) args (list (car args) kitty-treesit-dir)))
+(advice-add 'treesit-install-language-grammar :filter-args #'kitty--treesit-out-dir)
+
+(declare-function kitty-msvc-ensure-env "kitty-msvc")
+(defun kitty--treesit-msvc-env (&rest _)
+  "clang links a grammar DLL with MSVC's linker and libraries."
+  (when (and (eq system-type 'windows-nt) (fboundp 'kitty-msvc-ensure-env))
+    (kitty-msvc-ensure-env)))
+(advice-add 'treesit-install-language-grammar :before #'kitty--treesit-msvc-env)
 
 (add-hook 'emacs-startup-hook
           (lambda ()
