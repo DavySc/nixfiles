@@ -77,10 +77,13 @@ packages from ELPA and MELPA on the first start (a few minutes, once), into
 
 Different on Windows:
 
-- **Tree-sitter grammars** are not bundled. `treesit-auto` offers to build the
-  one a file needs (it needs a C compiler, e.g. from MSYS2); until then the
-  classic mode of that language is used, which is fine, and the tree-sitter
-  text objects (`if` / `af` calls, `S`, `an` / `in`) fall back or say so.
+- **Tree-sitter grammars** are not bundled. Emacs offers to build the one a
+  file needs; kittymax builds it with clang from LLVM (which `install.ps1`
+  installs) and Visual Studio's linker, since Windows has no `cc`. Until a
+  grammar is there the classic mode of that language is used, which is fine,
+  and the tree-sitter text objects (`if` / `af` calls, `S`, `an` / `in`) fall
+  back or say so. With no C compiler at all nothing is offered. Built
+  grammars go to `%LOCALAPPDATA%\kittymax`'s data, once.
 - **Not installed** because they need a Unix pty, a native module or a binary
   Windows lacks: `eat` (`SPC t t` and `C-/` open eshell instead; Claude Code
   on `SPC a` needs eat, so it is not there), `jinx` (spell
