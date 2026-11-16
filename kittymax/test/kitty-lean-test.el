@@ -252,6 +252,18 @@ format-mode-line says nothing in batch Emacs: so, its rules for a list
          (cl-remove-if-not (lambda (d) (memq (flymake-diagnostic-type d) '(:error eglot-error)))
                            (flymake-diagnostics)))))
 
+(ert-deftest kitty-lean-booster-leaves-json-to-emacs ()
+  "With emacs-lsp-booster in front of the servers (package.nix puts it on PATH),
+it only buffers: its bytecode mode turns Lean's ⊢ into raw bytes and leaves
+the webview no JSON to pass on.  In kittymax's own Emacs (run.sh) eglot-booster
+is there, and the goal tests go through the booster too."
+  (unless (and (executable-find "emacs-lsp-booster") (locate-library "eglot-booster"))
+    (signal 'ert-test-skipped '("no emacs-lsp-booster or eglot-booster")))
+  (kitty-lean-test--boot)
+  (require 'eglot)
+  (should (bound-and-true-p eglot-booster-mode))
+  (should (bound-and-true-p eglot-booster-io-only)))
+
 (ert-deftest kitty-lean-server-diagnostics-and-infoview ()
   "A Lean file: the server, its diagnostics, the infoview following the cursor."
   (kitty-lean-test--skip-unless-lean)
@@ -642,11 +654,18 @@ again instead of waiting for nothing.  test/kitty_lean_start.tla's Fix."
   (kitty-lean-test--wait 3 #'ignore)
   (clrhash kitty-lean--starts)
   ;; (a server that starts and exits is the same hand-over, from eglot's
-  ;; shutdown handler; batch Emacs dies of the error eglot raises there)
-  (let ((nael-eglot-contact '("kitty-lean-no-such-lake" "serve")))
-    (kitty-lean-test--visit "Demo/Good.lean")
-    (kitty-lean-test--wait 5 #'ignore)
-    (should-not (eglot-managed-p)))
+  ;; shutdown handler; batch Emacs dies of the error eglot raises there.
+  ;; emacs-lsp-booster in front makes a missing lake one of those: the
+  ;; booster starts, then exits, so it stays out of this test)
+  (let ((nael-eglot-contact '("kitty-lean-no-such-lake" "serve"))
+        (boosted (bound-and-true-p eglot-booster-mode)))
+    (when boosted (eglot-booster-mode -1))
+    (unwind-protect
+        (progn
+          (kitty-lean-test--visit "Demo/Good.lean")
+          (kitty-lean-test--wait 5 #'ignore)
+          (should-not (eglot-managed-p)))
+      (when boosted (eglot-booster-mode 1))))
   ;; lake works again (the toolchain is there now)
   (should (with-current-buffer (kitty-lean-test--visit "Demo/Bad.lean")
             (kitty-lean-test--wait 30 (lambda () (eglot-managed-p))))))
@@ -1483,7 +1502,7 @@ last never left behind."
 
 (ert-deftest kitty-lean-webview-relays-lean ()
   "A page's calls reach Lean and come back as Lean sent them, to that page only:
-a session, the goals at the cursor; the hello first."
+a session, the goals at the cursor; the hello first, and once per server."
   (kitty-lean-test--skip-unless-lean)
   (kitty-lean-test--boot)
   (let* ((buf (kitty-lean-test--bad-with-goal))
@@ -1525,7 +1544,14 @@ a session, the goals at the cursor; the hello first."
           ;; B's id 0 is B's own
           (kitty-lean-test--http url "call?page=pageB" (json-encode '((id . 0) (m . "saveConfig") (a . [nil]))))
           (should (kitty-lean-test--wait 5 (lambda () (kitty-lean-test--answer b 0))))
-          (should (stringp (plist-get (kitty-lean-test--answer a 0) :v))))
+          (should (stringp (plist-get (kitty-lean-test--answer a 0) :v)))
+          ;; another file under the same server, and a buffer leaving eglot:
+          ;; no restart for the pages (they would drop their RPC sessions)
+          (let ((good (kitty-lean-test--visit "Demo/Good.lean")))
+            (should (kitty-lean-test--wait 30 (lambda () (with-current-buffer good (eglot-managed-p)))))
+            (with-temp-buffer (eglot--managed-mode -1))
+            (kitty-lean-test--wait 1 #'ignore)
+            (should (= 1 (seq-count (lambda (e) (equal (plist-get e :m) "serverRestarted")) (funcall a))))))
       (funcall a t) (funcall b t)
       (kitty-lean-webview-stop))))
 
@@ -1542,19 +1568,28 @@ a session, the goals at the cursor; the hello first."
 
 (ert-deftest kitty-lean-webview-pages-come-and-go ()
   "A stream the page closed is down, not an error in Lean's hooks; a page that
-never opens its stream is forgotten too; the hello waits for a Lean server."
+never opens its stream is forgotten too; the hello waits for a Lean server,
+and comes again only for another server: buffers entering eglot are no
+restart (test/kitty_lean_greet.tla)."
   (let ((url (kitty-lean-webview--start))
         (kitty-lean-webview-page-timeout 0)
-        (server nil))
+        (server nil) (hellos nil))
     (unwind-protect
-        (cl-letf (((symbol-function 'kitty-lean-webview--hello) (lambda (_) server)))
+        (cl-letf (((symbol-function 'kitty-lean-webview--hello) (lambda (_p _b s) (push s hellos)))
+                  ((symbol-function 'kitty-lean-webview--source) (lambda () (current-buffer)))
+                  ((symbol-function 'eglot-current-server) (lambda () server)))
           (let ((s (kitty-lean-test--stream url "A")))
             (should (kitty-lean-test--wait 5 (lambda () (gethash "A" kitty-lean-webview--pages))))
             (let ((page (gethash "A" kitty-lean-webview--pages)))
-              (should-not (kitty-lean-webview--page-greeted page))   ; no server yet
-              (setq server t)
+              (should-not hellos)                    ; no server yet
+              (setq server 'lean-1)
               (kitty-lean-webview--on-server)
-              (should (kitty-lean-webview--page-greeted page))
+              (kitty-lean-webview--on-server)        ; another buffer under eglot
+              (kitty-lean-webview--on-move)
+              (should (equal hellos '(lean-1)))
+              (setq server 'lean-2)                  ; the server restarted
+              (kitty-lean-webview--on-server)
+              (should (equal hellos '(lean-2 lean-1)))
               ;; the page goes; Emacs writes before it has read that (more
               ;; writes would kill a batch Emacs with SIGPIPE; an
               ;; interactive one ignores it, and the write errors instead)
@@ -1584,6 +1619,40 @@ never opens its stream is forgotten too; the hello waits for a Lean server."
             (should (kitty-lean-test--wait 5 (lambda () (equal (funcall s) '((:reload t))))))
             (funcall s t)))
       (kitty-lean-webview-stop))))
+
+(ert-deftest kitty-lean-webview-hears-only-lean ()
+  "Other servers' edits stay away from the pages; a call that is no JSON is
+no error in the process filter; a terminal's \\w reuses one redirect file,
+gone when the webview stops."
+  (let ((kitty-lean-webview--pages (make-hash-table :test #'equal))
+        (sent nil))
+    (cl-letf (((symbol-function 'kitty-lean-webview--send) (lambda (_page e) (push e sent))))
+      (let ((page (kitty-lean-webview--page "P")))
+        (puthash "textDocument/didChange" 1 (kitty-lean-webview--page-subs page))
+        (cl-letf (((symbol-function 'kitty-lean--server-p) (lambda (c) (eq c 'lean))))
+          (kitty-lean-webview--on-client-notification-safe
+           'python :textDocument/didChange '(:textDocument (:uri "file:///x.py")))
+          (should-not sent)
+          (kitty-lean-webview--on-client-notification-safe
+           'lean :textDocument/didChange '(:textDocument (:uri "file:///x.lean")))
+          (should (= (length sent) 1)))))
+    ;; (ert sets debug-on-error, which lets errors through with-demoted-errors)
+    (should-not (condition-case e
+                    (let ((debug-on-error nil) (inhibit-message t))
+                      (kitty-lean-webview--call "P" "not json") nil)
+                  (error e))))
+  (let ((kitty-lean-webview-display 'browser) (kitty-lean-webview-dist temporary-file-directory)
+        (opened nil))
+    (cl-letf (((symbol-function 'browse-url) (lambda (u) (push u opened))))
+      (unwind-protect
+          (progn (kitty-lean-webview) (kitty-lean-webview)
+                 (should (= (length opened) 2))
+                 (should (equal (car opened) (cadr opened)))
+                 (should (file-exists-p kitty-lean-webview--redirect))
+                 (should (= (file-modes kitty-lean-webview--redirect) #o600)))
+        (let ((file kitty-lean-webview--redirect))
+          (kitty-lean-webview-stop)
+          (should-not (file-exists-p file)))))))
 
 (ert-deftest kitty-lean-webview-answers-are-leans-json ()
   "A page's answer is the JSON Lean sent ({} stays {}), even when jsonrpc runs

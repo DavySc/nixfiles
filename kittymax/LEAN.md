@@ -13,19 +13,21 @@ below), `lisp/lang/kitty-lean-widgets.el` (Lean's widgets as text),
 elan from Nix to fetch each project's toolchain.
 
 Tested against Lean 4.35 and a real Lake project in `test/kitty-lean-test.el`
-(58 tests): the server, diagnostics, the infoview, progress, completion,
+(60 tests): the server, diagnostics, the infoview, progress, completion,
 definitions, hovers, `\` input, sorry, `Try this`, restart, `lake build` and
 run, and Org blocks with `C-c '`. Most of the rest are regression tests from
 two reviews that tried each feature against real Lean: K on subterms, session
 loss, pause, edits racing questions, failed, slow and hidden server starts,
 narrowed buffers, wide characters, and how fast Lean checks with the infoview
-open; and the webview, served and relaying a real server. Six TLA+ models
+open; the webview, served and relaying a real server; and eglot-booster left
+to buffering, since its bytecode mode garbles `⊢`. Seven TLA+ models
 (`test/kitty_lean*.tla`) cover the timing: the infoview's refresh, the RPC
 session, one server per project (with the selected buffer and eglot's
 connect timeout), folds and buttons answered late (a trace's children,
-`[apply]` after an edit), diagnostics taken in pieces, and the webview's
-calls, event streams and pages. TLC checks each model, and also checks that
-it rejects the broken versions that the reviews found.
+`[apply]` after an edit), diagnostics taken in pieces, the webview's
+calls, event streams and pages, and when a page is told the server
+restarted. TLC checks each model, and also checks that it rejects the
+broken versions that the reviews found.
 
 ## Editing
 

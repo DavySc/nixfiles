@@ -43,6 +43,7 @@
 (require 'jsonrpc)
 
 (declare-function kitty-lean--buffer-for-uri "kitty-lean")
+(declare-function kitty-lean--server-p "kitty-lean")
 (declare-function kitty-lean--diagnostics-all "kitty-lean")
 (declare-function kitty-lean--flush "kitty-lean")
 (defvar kitty-lean--diagnostics)
@@ -99,7 +100,14 @@ one that comes back is told to reload, its subscriptions and answers gone.")
 jsonrpc runs an answer's continuation later, outside the delivery, while a
 synchronous request is waiting: the JSON is kept here for it.")
 (defvar kitty-lean-webview--keepalive nil)
+(defmacro kitty-lean-webview--quietly (&rest body)
+  "BODY, its errors only messages: it runs inside eglot, jsonrpc, a
+process filter or the command loop."
+  `(with-demoted-errors "kitty-lean-webview: %S" ,@body))
+
 (defvar kitty-lean-webview--buffer nil "The xwidget buffer showing the page.")
+(defvar kitty-lean-webview--redirect nil
+  "The private file that sends a browser to the page (a terminal Emacs's `\\w').")
 (defvar kitty-lean-webview--files (make-hash-table :test #'equal)
   "Served file -> its bytes, read once.")
 
@@ -135,8 +143,9 @@ synchronous request is waiting: the JSON is kept here for it.")
   (when kitty-lean-webview--server (delete-process kitty-lean-webview--server))
   (when (buffer-live-p kitty-lean-webview--buffer)
     (let ((kill-buffer-query-functions nil)) (kill-buffer kitty-lean-webview--buffer)))
+  (when kitty-lean-webview--redirect (ignore-errors (delete-file kitty-lean-webview--redirect)))
   (setq kitty-lean-webview--server nil kitty-lean-webview--keepalive nil
-        kitty-lean-webview--buffer nil))
+        kitty-lean-webview--buffer nil kitty-lean-webview--redirect nil))
 
 (defun kitty-lean-webview--sentinel (proc _event)
   (unless (process-live-p proc)
@@ -232,11 +241,16 @@ synchronous request is waiting: the JSON is kept here for it.")
       (puthash id (kitty-lean-webview--page-make :id id :gone-since (float-time))
                kitty-lean-webview--pages)))
 
+(defconst kitty-lean-webview--stream-head
+  ;; chunked: WebKit (libsoup) holds back a stream that has neither a
+  ;; length nor chunks
+  "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\nTransfer-Encoding: chunked\r\n\r\n")
+
 (defun kitty-lean-webview--open-stream (proc id)
   "PROC is page ID's event stream from now on: send what waited for it."
   (if (member id kitty-lean-webview--forgotten)
       (progn
-        (process-send-string proc "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\nTransfer-Encoding: chunked\r\n\r\n")
+        (process-send-string proc kitty-lean-webview--stream-head)
         (kitty-lean-webview--chunk proc "data: {\"reload\":true}\n\n"))
     (kitty-lean-webview--open-stream-1 proc id)))
 
@@ -247,9 +261,7 @@ synchronous request is waiting: the JSON is kept here for it.")
     (process-put proc 'page page)
     (setf (kitty-lean-webview--page-stream page) proc
           (kitty-lean-webview--page-gone-since page) nil)
-    ;; chunked: WebKit (libsoup) holds back a stream that has neither a
-    ;; length nor chunks
-    (process-send-string proc "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\nTransfer-Encoding: chunked\r\n\r\n")
+    (process-send-string proc kitty-lean-webview--stream-head)
     (kitty-lean-webview--chunk proc ":\n\n")
     (let ((waiting (reverse (kitty-lean-webview--page-outbox page))))
       (setf (kitty-lean-webview--page-outbox page) nil)
@@ -257,11 +269,13 @@ synchronous request is waiting: the JSON is kept here for it.")
     (kitty-lean-webview--greet page)))
 
 (defun kitty-lean-webview--greet (page)
-  "Send PAGE the hello, once, as soon as it has a stream and there is a Lean server."
-  (unless (kitty-lean-webview--page-greeted page)
-    (when (and (kitty-lean-webview--page-stream page)
-               (kitty-lean-webview--hello page))
-      (setf (kitty-lean-webview--page-greeted page) t))))
+  "Send PAGE the hello once it has a stream, and again only when the Lean
+server is another one (VS Code's serverRestarted): it remembers which."
+  (when-let* ((buffer (and (kitty-lean-webview--page-stream page) (kitty-lean-webview--source)))
+              (server (with-current-buffer buffer (eglot-current-server))))
+    (unless (eq server (kitty-lean-webview--page-greeted page))
+      (setf (kitty-lean-webview--page-greeted page) server)
+      (kitty-lean-webview--hello page buffer server))))
 
 (defun kitty-lean-webview--send (page event)
   "Send EVENT (a unibyte JSON string) to PAGE, or keep it until PAGE is back."
@@ -311,8 +325,8 @@ own response message, a JSON string) or \"err\"."
   "PAGE is gone: close its RPC sessions, drop what waited for it."
   (when-let* ((proc (kitty-lean-webview--page-stream page)))
     (delete-process proc))
-  (dolist (s (kitty-lean-webview--page-sessions page))
-    (kitty-lean-webview--release-session s))
+  ;; its RPC sessions end with it: Lean has no close for one, they end when
+  ;; their keep-alives stop, and the page is no longer kept alive
   (remhash (kitty-lean-webview--page-id page) kitty-lean-webview--pages)
   (push (kitty-lean-webview--page-id page) kitty-lean-webview--forgotten)
   (when (nthcdr 32 kitty-lean-webview--forgotten)
@@ -344,37 +358,33 @@ and kept for a page's request whose answer it is."
       (puthash key kitty-lean-webview--raw kitty-lean-webview--wanted))
     (funcall fn conn msg)))
 
-(defun kitty-lean-webview--hello (page)
-  "What a new page needs before it can show anything: VS Code's initInfoView.
-Nil, sending nothing, while no Lean buffer has a server."
-  (when-let* ((buffer (kitty-lean-webview--source))
-              (server (with-current-buffer buffer (eglot-current-server))))
-    (when-let* ((loc (kitty-lean-webview--location buffer)))
-      ;; every page now has this position: a move is one away from it
-      (setq kitty-lean-webview--cursor loc)
-      (kitty-lean-webview--broadcast (kitty-lean-webview--event "changedCursorLocation" loc))
-      (kitty-lean-webview--send page (kitty-lean-webview--event "initialize" loc)))
-    (kitty-lean-webview--send page (kitty-lean-webview--event "changedInfoviewConfig" kitty-lean-webview-config))
-    (progn
-      (kitty-lean-webview--send page (kitty-lean-webview--event "serverStopped" nil))
-      (kitty-lean-webview--send
-       page (kitty-lean-webview--event
-             "serverRestarted"
-             (list :capabilities (eglot--capabilities server)
-                   :serverInfo (eglot--server-info server))))
-      ;; the diagnostics kitty-lean holds (this file may load late), the
-      ;; latest progress seen since it loaded
-      (maphash (lambda (uri entry)
-                 (kitty-lean-webview--send
-                  page (kitty-lean-webview--event-raw
-                        "gotServerNotification" "textDocument/publishDiagnostics"
-                        (kitty-lean-webview--diagnostics-message uri (car entry) (kitty-lean--diagnostics-all uri)))))
-               kitty-lean--diagnostics)
-      (maphash (lambda (key raw)
-                 (kitty-lean-webview--send
-                  page (kitty-lean-webview--event-raw "gotServerNotification" (car key) raw)))
-               kitty-lean-webview--last))
-    t))
+(defun kitty-lean-webview--hello (page buffer server)
+  "What PAGE needs before it can show anything, about BUFFER and its SERVER:
+VS Code's initInfoView."
+  (let ((loc (kitty-lean-webview--location buffer)))
+    ;; every page now has this position: a move is one away from it
+    (setq kitty-lean-webview--cursor loc)
+    (kitty-lean-webview--broadcast (kitty-lean-webview--event "changedCursorLocation" loc))
+    (kitty-lean-webview--send page (kitty-lean-webview--event "initialize" loc)))
+  (kitty-lean-webview--send page (kitty-lean-webview--event "changedInfoviewConfig" kitty-lean-webview-config))
+  (kitty-lean-webview--send page (kitty-lean-webview--event "serverStopped" nil))
+  (kitty-lean-webview--send
+   page (kitty-lean-webview--event
+         "serverRestarted"
+         (list :capabilities (eglot--capabilities server)
+               :serverInfo (eglot--server-info server))))
+  ;; the diagnostics kitty-lean holds (this file may load late), the
+  ;; latest progress seen since it loaded
+  (maphash (lambda (uri entry)
+             (kitty-lean-webview--send
+              page (kitty-lean-webview--event-raw
+                    "gotServerNotification" "textDocument/publishDiagnostics"
+                    (kitty-lean-webview--diagnostics-message uri (car entry) (kitty-lean--diagnostics-all uri)))))
+           kitty-lean--diagnostics)
+  (maphash (lambda (key raw)
+             (kitty-lean-webview--send
+              page (kitty-lean-webview--event-raw "gotServerNotification" (car key) raw)))
+           kitty-lean-webview--last))
 
 (defvar kitty-lean-webview--source nil "The Lean buffer the cursor was last in.")
 
@@ -426,10 +436,11 @@ Not diagnostics: those come whole from `kitty-lean-diagnostics-functions'."
     (kitty-lean-webview--notify "textDocument/publishDiagnostics"
                                 (kitty-lean-webview--diagnostics-message uri version diagnostics))))
 
-(defun kitty-lean-webview--on-client-notification (_conn method &optional params)
+(defun kitty-lean-webview--on-client-notification (conn method &optional params)
   "Emacs tells Lean METHOD (didChange, didClose): tell the subscribed pages."
   (when (and (> (hash-table-count kitty-lean-webview--pages) 0)
-             (memq method '(:textDocument/didChange :textDocument/didClose)))
+             (memq method '(:textDocument/didChange :textDocument/didClose))
+             (kitty-lean--server-p conn))
     (let ((name (substring (symbol-name method) 1)))
       (maphash (lambda (_ page)
                  (when (gethash name (kitty-lean-webview--page-subs page))
@@ -458,15 +469,12 @@ Not diagnostics: those come whole from `kitty-lean-diagnostics-functions'."
   (json-parse-string (json-serialize value :false-object :json-false :null-object nil)
                      :object-type 'plist :null-object nil :false-object :json-false))
 
-(defun kitty-lean-webview--release-session (s)
-  "Lean has no close for a session: it ends when its keep-alives stop."
-  (ignore s))
-
 (defun kitty-lean-webview--call (page-id body)
   "The page PAGE-ID calls an EditorApi method: BODY is {id, m, a}.
 A forgotten page's calls are dropped: it reloads when its stream is back."
   (unless (member page-id kitty-lean-webview--forgotten)
-    (kitty-lean-webview--call-1 page-id body)))
+    ;; in the server's process filter; a body that is no JSON has no id to answer
+    (kitty-lean-webview--quietly (kitty-lean-webview--call-1 page-id body))))
 
 (defun kitty-lean-webview--call-1 (page-id body)
   (let* ((page (kitty-lean-webview--page page-id))
@@ -653,14 +661,12 @@ A forgotten page's calls are dropped: it reloads when its stream is back."
                           '(display-buffer-in-side-window (side . right) (window-width . 0.42))))
       ;; through a private file that sends the browser on: the address
       ;; holds the secret, and a browser's command line is public
-      (browse-url (concat "file://" (make-temp-file
-                                     "kitty-lean-infoview" nil ".html"
-                                     (format "<!DOCTYPE html><meta http-equiv=\"refresh\" content=\"0; url=%s\">" url)))))
+      (let ((html (format "<!DOCTYPE html><meta http-equiv=\"refresh\" content=\"0; url=%s\">" url)))
+        (if (and kitty-lean-webview--redirect (file-exists-p kitty-lean-webview--redirect))
+            (write-region html nil kitty-lean-webview--redirect nil 'quiet)
+          (setq kitty-lean-webview--redirect (make-temp-file "kitty-lean-infoview" nil ".html" html)))
+        (browse-url (concat "file://" kitty-lean-webview--redirect))))
     url))
-
-(defmacro kitty-lean-webview--quietly (&rest body)
-  "BODY, its errors only messages: it runs inside eglot, jsonrpc or the command loop."
-  `(with-demoted-errors "kitty-lean-webview: %S" ,@body))
 
 (defun kitty-lean-webview--on-client-notification-safe (&rest args)
   (kitty-lean-webview--quietly (apply #'kitty-lean-webview--on-client-notification args)))
@@ -671,19 +677,18 @@ A forgotten page's calls are dropped: it reloads when its stream is back."
 
 (advice-add 'jsonrpc-connection-receive :around #'kitty-lean-webview--keep-raw)
 (advice-add 'jsonrpc-notify :before #'kitty-lean-webview--on-client-notification-safe)
-(cl-defmethod eglot-handle-notification :before (_server method &rest params)
-  (kitty-lean-webview--quietly (kitty-lean-webview--on-notification method params)))
+(cl-defmethod eglot-handle-notification :before (server method &rest params)
+  (when (kitty-lean--server-p server)
+    (kitty-lean-webview--quietly (kitty-lean-webview--on-notification method params))))
 (add-hook 'post-command-hook #'kitty-lean-webview--on-move-safe)
 (add-hook 'kitty-lean-diagnostics-functions #'kitty-lean-webview--on-diagnostics-safe)
 
 (defun kitty-lean-webview--on-server ()
-  "A Lean server came up, or up again: pages greet it (VS Code's serverRestarted)."
+  "A buffer entered or left eglot: pages hear of a Lean server new to them."
   (kitty-lean-webview--quietly
-   (maphash (lambda (_ page)
-              (setf (kitty-lean-webview--page-greeted page) nil)
-              (kitty-lean-webview--greet page))
-            kitty-lean-webview--pages)))
+   (maphash (lambda (_ page) (kitty-lean-webview--greet page)) kitty-lean-webview--pages)))
 (add-hook 'eglot-managed-mode-hook #'kitty-lean-webview--on-server)
+(add-hook 'kill-emacs-hook #'kitty-lean-webview-stop)
 
 (provide 'kitty-lean-webview)
 ;;; kitty-lean-webview.el ends here
