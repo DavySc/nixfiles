@@ -8,20 +8,24 @@ or close; **partial**: the job, but less of it; **gap**: not there.
 The pieces: [nael](https://codeberg.org/mekeor/nael) (the major mode, `\`
 abbreviations, eglot setup for `lake serve`), eglot (the LSP client),
 `lisp/lang/kitty-lean.el` (the infoview, file progress, Lake, Org and the rest
-below), `lisp/lang/kitty-lean-widgets.el` (Lean's widgets as text), elan from Nix to fetch each project's toolchain.
+below), `lisp/lang/kitty-lean-widgets.el` (Lean's widgets as text),
+`lisp/lang/kitty-lean-webview.el` (VS Code's own infoview in a webview, `\w`),
+elan from Nix to fetch each project's toolchain.
 
 Tested against Lean 4.35 and a real Lake project in `test/kitty-lean-test.el`
-(51 tests): the server, diagnostics, the infoview, progress, completion,
+(58 tests): the server, diagnostics, the infoview, progress, completion,
 definitions, hovers, `\` input, sorry, `Try this`, restart, `lake build` and
 run, and Org blocks with `C-c '`. Most of the rest are regression tests from
 two reviews that tried each feature against real Lean: K on subterms, session
 loss, pause, edits racing questions, failed, slow and hidden server starts,
 narrowed buffers, wide characters, and how fast Lean checks with the infoview
-open. Four TLA+ models (`test/kitty_lean*.tla`) cover the timing: the
-infoview's refresh, the RPC session, one server per project (with the
-selected buffer and eglot's connect timeout), and folds and buttons
-answered late (a trace's children, `[apply]` after an edit). TLC checks each model, and also
-checks that it rejects the broken versions that the reviews found.
+open; and the webview, served and relaying a real server. Six TLA+ models
+(`test/kitty_lean*.tla`) cover the timing: the infoview's refresh, the RPC
+session, one server per project (with the selected buffer and eglot's
+connect timeout), folds and buttons answered late (a trace's children,
+`[apply]` after an edit), diagnostics taken in pieces, and the webview's
+calls, event streams and pages. TLC checks each model, and also checks that
+it rejects the broken versions that the reviews found.
 
 ## Editing
 
@@ -31,6 +35,7 @@ checks that it rejects the broken versions that the reviews found.
 | A first start shows elan's toolchain download, however long it takes | no connect timeout for Lean; the mode line shows what `lake` prints while it starts (` Lean starting: info: downloading…`) | done |
 | Syntax highlighting (TextMate) + semantic highlighting | nael's font-lock + eglot's semantic tokens (Emacs 31) | done |
 | Diagnostics: squiggles, Problems view | flymake: underlines, margin dots, end-of-line text; `SPC x x` project list; `]d` `[d` | done |
+| Diagnostics in pieces while Lean checks (`incrementalDiagnosticSupport`), handed on in batches | the same: each message comes once, flymake gets them at most every 0.1 s (a file with 2000 messages: 3 MB of JSON and 1 s of Emacs' time, instead of 420 MB and 31 s) | done |
 | File progress: orange bars in the gutter, status bar | fringe bars on lines still being checked; ` ⧗ 42%` in the mode line (doom-modeline's misc-info) | done |
 | "Unsolved goals" / "Goals accomplished" gutter decorations (Lean ≥ 4.20) | ✓ in the right fringe beside a finished proof (at the end of the line in a terminal), 🛠 after the last line of one with goals left; Lean's silent "Goals accomplished!" kept out of flymake and the infoview, as VS Code does | done |
 | Hover (type, docstring) | eldoc in the echo area, `K` for the full doc | done |
@@ -82,7 +87,7 @@ checks that it rejects the broken versions that the reviews found.
 | Diff against a pinned position (lean.nvim's `\dx`) | none | gap |
 | Collapse goals and sections | `TAB` (or `za`, or a click on ▾ ▸) folds a section, a goal (each titled by its case when there are several), a trace node, a widget's `<details>`; folds stay as you left them across refreshes | done |
 | Copy a goal to the editor / as a comment | yank from the infoview buffer | partial |
-| Widgets: `Try this` buttons, ProofWidgets, `conv?` shift-click, user widgets (React) | drawn as text from the widget's data (lean.nvim's way): `Try this` `[apply]` buttons (`RET` / click; refused if the file changed since), error-code explanations, ProofWidgets HTML (headings, lists, bold / italic / code, colours, links, tables, `<details>`, MakeEditLink, interactive terms) and `<svg>` as an image in a graphical Emacs. Widgets that need their own JavaScript (Penrose diagrams, `conv?`'s selection panel, plots, custom React) show their name and that they need VS Code | partial |
+| Widgets: `Try this` buttons, ProofWidgets, `conv?` shift-click, user widgets (React) | all of them, drawn by VS Code's own infoview in a webview beside the code: `\w` (below). In the text infoview, drawn as text from the widget's data (lean.nvim's way): `Try this` `[apply]` buttons (`RET` / click; refused if the file changed since), error-code explanations, ProofWidgets HTML (headings, lists, bold / italic / code, colours, links, tables, `<details>`, MakeEditLink, interactive terms) and `<svg>` as an image in a graphical Emacs. Widgets that need their own JavaScript (Penrose diagrams, `conv?`'s selection panel, plots, custom React) show their name and point to `\w` | done (`\w`) |
 | Trace explorer (expandable `trace` messages) | each trace node a fold, classes shortened under their parent; children asked from Lean only when opened (`lazyTraceChildrenToInteractive`, as VS Code), and again on each refresh while open (VS Code keeps them); flymake's copy of a trace message is "(trace: unfold it in the infoview)", since Lean sends only "(trace)" once widgets are on, as VS Code's Problems shows it; no trace search | done (no search) |
 | Theming | your Emacs theme's faces | done |
 
@@ -115,23 +120,49 @@ checks that it rejects the broken versions that the reviews found.
 - `\` abbreviations work inside `lean` blocks in the org buffer itself.
 - Tangling writes `.lean`; `<le` + `TAB` inserts a block.
 
-## Rendering: how close it gets, and what cannot
+## VS Code's own infoview: `\w`
 
-What VS Code draws with a browser (the infoview is a React page), kittymax
-draws as text in a buffer.  Everything that is data from Lean has a text
-form and is done: goals, diffs, interactive messages, folds, traces, proof
-marks, `Try this`, ProofWidgets' HTML.  What is left needs a JavaScript
-runtime:
+`\w` opens the infoview VS Code shows, the same code (vscode-lean4's
+`@leanprover/infoview` package, from npm through Nix), beside the Lean file:
+in an xwidget webview in graphical Emacs (nixpkgs' emacs-pgtk is built with
+xwidgets), or in your browser from a terminal Emacs.  Emacs is its editor:
+it serves the page on 127.0.0.1 (a random port and a secret path) and
+relays between it and the `lake serve` eglot already runs, as VS Code's
+extension does.  So everything VS Code's infoview draws, it draws:
+widgets with their own JavaScript (Penrose, plots, `conv?`'s subterm
+selection, custom React), hovers inside hovers, pins, the gear's view
+settings.  Its clicks act in Emacs: `Try this` edits the buffer,
+Ctrl-click opens the definition, "Restart File" restarts it.  Not there:
+its right-click menu, which is VS Code's own (copy, go to definition, the
+trace search); the rest of that menu is the gear's.
 
-| | where it can work | cost |
-| --- | --- | --- |
-| Text widgets, folds, traces, marks, buttons | anywhere, terminal too | done here |
-| `<svg>` from ProofWidgets, fringe ✓ | graphical Emacs (kittymax is emacs-pgtk) | done here |
-| Widgets whose drawing is their own JavaScript: Penrose diagrams, plots, graph layouts, `conv?`'s subterm selection, custom React | only by running the real infoview: vscode-lean4's `lean4-infoview` package in a webview (Emacs built with xwidgets, which nixpkgs' emacs-pgtk is not by default) or a browser tab, with a bridge relaying its RPC to eglot's `lake serve` | days of work, a second UI to keep in step; not done |
-| Math in hover Markdown (KaTeX) | graphical Emacs could draw LaTeX as images; VS Code's hover does not either | not done |
-| Images in a terminal (kitty's graphics protocol) | Emacs does not speak it | not possible today |
+What it costs, measured with Chromium on Lean 4.35:
 
-The remaining gaps: widgets made of JavaScript (above), trace search, the
-diff against a pinned position, sticky scroll, folding ranges in the
-editor, and VS Code's project management (module hierarchy, lakefile
-schema, elan UI, setup diagnostics).
+| | time |
+| --- | --- |
+| page up, infoview ready | 0.3 s |
+| goal of a small proof after a cursor move | 60 ms (50 of them the infoview's own debounce, as in VS Code; the relay through Emacs 3 ms) |
+| a goal of 300 hypotheses (Lean's answer 214 kB) | 380 ms (Lean 275 ms, the relay 4 ms; the text infoview draws it in 12 ms once Lean answers) |
+| 2000 messages, All Messages opened | 0.3 s; the page's JavaScript heap 40 MB (110 MB with the 300-hypothesis goal) |
+
+Lean's answers reach the page as the exact JSON Lean sent (eglot's JSON-RPC
+keeps it), so Emacs neither parses them twice nor loses `{}` from `null`.
+Only the page's own files are served, and only under the secret path; a
+browser is sent there through a private file, so the secret is not on its
+command line.  A page whose connection stays down a minute (a laptop
+asleep) is forgotten, its RPC sessions let go, and it reloads when it is
+back.  The webview (WebKit's processes) takes about 280 MB of memory
+beside Emacs.
+The text infoview stays (`\i`): it is what a terminal without a browser has,
+and it is lighter.
+
+## What cannot
+
+| | why |
+| --- | --- |
+| Pictures inside a terminal Emacs (kitty's graphics protocol) | Emacs 31 does not speak it; a terminal Emacs opens `\w` in a browser instead |
+| Math in hover Markdown (KaTeX) in the text infoview | `K` shows the TeX; `\w`'s hovers render it |
+
+The remaining gaps: sticky scroll, folding ranges in the editor, and VS
+Code's project management (module hierarchy, lakefile schema, elan UI,
+setup diagnostics).

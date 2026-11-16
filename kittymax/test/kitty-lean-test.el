@@ -1035,7 +1035,7 @@ diagnostics support (the ✓ marks), as from VS Code; other servers nothing."
     (should (equal (kitty-lean--initialization-options '(:a 1) 'lean) '(:a 1 :hasWidgets t)))
     (should (equal (kitty-lean--initialization-options '(:a 1) 'c) '(:a 1)))
     (should (equal (plist-get (kitty-lean--client-capabilities '(:workspace nil) 'lean) :lean)
-                   '(:silentDiagnosticSupport t)))
+                   '(:silentDiagnosticSupport t :incrementalDiagnosticSupport t)))
     (should-not (plist-member (kitty-lean--client-capabilities '(:workspace nil) 'c) :lean))))
 
 (ert-deftest kitty-lean-silent-diagnostics-become-marks ()
@@ -1373,3 +1373,233 @@ TAB at the end of a closed title, edits that start at one place."
       (should (< (- (float-time) t0) 0.3)))
     (should (= 2000 (length kitty-lean--mark-overlays)))
     (should (= 11 (line-number-at-pos (overlay-start (nth 1998 kitty-lean--mark-overlays)))))))
+
+;;;; Diagnostics in pieces
+
+(ert-deftest kitty-lean-diagnostics-add-up-and-arrive ()
+  "Lean's incremental reports add up per version, a full one replaces them;
+the first is handed on at once, the rest once the interval is over, the
+last never left behind."
+  (let ((kitty-lean--diagnostics (make-hash-table :test #'equal))
+        (kitty-lean-diagnostics-interval 0.05)
+        (given nil))
+    (cl-letf (((symbol-function 'jsonrpc-running-p) (lambda (_) t))
+              ((symbol-function 'eglot-handle-notification)
+               (lambda (_s _m &rest args) (push (length (plist-get args :diagnostics)) given)))
+              ((symbol-function 'kitty-lean--on-diagnostics) (lambda (_u d) d)))
+      (cl-flet ((report (version inc n)
+                  (when (kitty-lean--diagnostics-add "u" version inc (make-vector n '(:message "m")))
+                    (kitty-lean--diagnostics-deliver 'server "u"))))
+        (report 1 nil 1)
+        (should (equal given '(1)))       ; at once
+        (report 1 t 2) (report 1 t 3)
+        (should (equal given '(1)))       ; held for the interval
+        (should (kitty-lean-test--wait 2 (lambda () (equal given '(6 1)))))
+        (report 2 nil 4)                  ; a new version replaces
+        (report 2 t 1)
+        (should (kitty-lean-test--wait 2 (lambda () (equal (car given) 5))))
+        (report 1 t 7)                    ; a late piece of an old version is dropped
+        (kitty-lean-test--wait 0.2 #'ignore)
+        (should (equal (car given) 5))
+        (should (equal (length (kitty-lean--diagnostics-all "u")) 5))))))
+
+(ert-deftest kitty-lean-many-messages-come-in-pieces ()
+  "A file with many messages: Lean sends each once, not the growing list each time."
+  (kitty-lean-test--skip-unless-lean)
+  (kitty-lean-test--boot)
+  (kitty-lean-test--fresh)
+  (kitty-lean-test--write (kitty-lean-test--project) "Many.lean"
+                          (mapconcat (lambda (i) (format "#eval %d\n" i)) (number-sequence 1 300) ""))
+  (let* ((bytes 0)
+         (count (lambda (_proc string) (setq bytes (+ bytes (length string))))))
+    (advice-add 'jsonrpc--process-filter :before count)
+    (unwind-protect
+        (let ((buf (kitty-lean-test--visit "Many.lean")))
+          (should (kitty-lean-test--wait 60 (lambda () (eglot-managed-p))))
+          (should (kitty-lean-test--wait 120 (lambda () (= 300 (length (with-current-buffer buf (flymake-diagnostics)))))))
+          ;; all 300 at once would be ~45 kB; 300 growing lists ~7 MB
+          (should (< bytes 1000000)))
+      (advice-remove 'jsonrpc--process-filter count))))
+
+;;;; VS Code's infoview, served
+
+(require 'kitty-lean-webview)
+
+(defun kitty-lean-test--http (url path &optional body)
+  "A request to the webview server at URL; (STATUS . BODY) of its answer."
+  (let* ((u (url-generic-parse-url url))
+         (answer "")
+         (proc (make-network-process :name "test-http" :host "127.0.0.1" :service (url-port u)
+                                     :coding 'binary :noquery t
+                                     :filter (lambda (_ s) (setq answer (concat answer s)))))
+         (target (concat (url-filename u) path)))
+    (process-send-string proc (concat (if body "POST " "GET ") target " HTTP/1.1\r\nHost: x\r\n"
+                                      (if body (format "Content-Length: %d\r\n" (string-bytes body)) "")
+                                      "\r\n" (or body "")))
+    (kitty-lean-test--wait 5 (lambda () (and (string-match "\r\n\r\n" answer)
+                                             (string-match "Content-Length: \\([0-9]+\\)" answer)
+                                             (>= (- (length answer) (string-search "\r\n\r\n" answer) 4)
+                                                 (string-to-number (match-string 1 answer))))))
+    (delete-process proc)
+    (cons (and (string-match "HTTP/1.1 \\([0-9]+\\)" answer) (string-to-number (match-string 1 answer)))
+          (substring answer (min (length answer) (+ 4 (or (string-search "\r\n\r\n" answer) 0)))))))
+
+(defun kitty-lean-test--stream (url page)
+  "Open PAGE's event stream at URL: a function returning the events so far, as JSON."
+  (let* ((u (url-generic-parse-url url))
+         (raw "")
+         (proc (make-network-process :name "test-events" :host "127.0.0.1" :service (url-port u)
+                                     :coding 'binary :noquery t
+                                     :filter (lambda (_ s) (setq raw (concat raw s))))))
+    (process-send-string proc (format "GET %sevents?page=%s HTTP/1.1\r\nHost: x\r\n\r\n" (url-filename u) page))
+    (lambda (&optional close)
+      (if close (delete-process proc)
+        (let (events (start 0))
+          (while (string-match "^data: \\(.*\\)\n\n" raw start)
+            (push (json-parse-string (decode-coding-string (match-string 1 raw) 'utf-8)
+                                     :object-type 'plist :null-object nil :false-object nil)
+                  events)
+            (setq start (match-end 0)))
+          (nreverse events))))))
+
+(defun kitty-lean-test--answer (events id)
+  (seq-find (lambda (e) (equal (plist-get e :id) id)) (funcall events)))
+
+(ert-deftest kitty-lean-webview-serves-only-with-its-token ()
+  (let* ((dist (make-temp-file "dist" t))
+         (kitty-lean-webview-dist dist))
+    (with-temp-file (expand-file-name "index.css" dist) (insert "body{}"))
+    (unwind-protect
+        (let ((url (kitty-lean-webview--start)))
+          (should (string-match-p "host.js" (cdr (kitty-lean-test--http url ""))))
+          (should (equal (kitty-lean-test--http url "dist/index.css") '(200 . "body{}")))
+          (should (equal (car (kitty-lean-test--http url "dist/../../etc/passwd")) 404))
+          (should (equal (car (kitty-lean-test--http url "dist//etc/passwd")) 404))
+          (should (equal (car (kitty-lean-test--http url "dist/~/.bashrc")) 404))
+          (should (string-match-p "--vscode-editor-foreground" (cdr (kitty-lean-test--http url "theme.css"))))
+          ;; the same port without the token
+          (should (equal (car (kitty-lean-test--http (replace-regexp-in-string "/[0-9a-f]+/$" "/x/" url) "")) 404)))
+      (kitty-lean-webview-stop))))
+
+(ert-deftest kitty-lean-webview-relays-lean ()
+  "A page's calls reach Lean and come back as Lean sent them, to that page only:
+a session, the goals at the cursor; the hello first."
+  (kitty-lean-test--skip-unless-lean)
+  (kitty-lean-test--boot)
+  (let* ((buf (kitty-lean-test--bad-with-goal))
+         (uri (with-current-buffer buf (kitty-lean--uri)))
+         (url (kitty-lean-webview--start))
+         (a (kitty-lean-test--stream url "pageA"))
+         (b (kitty-lean-test--stream url "pageB")))
+    (unwind-protect
+        (progn
+          (should (kitty-lean-test--wait 5 (lambda () (seq-find (lambda (e) (equal (plist-get e :m) "serverRestarted")) (funcall a)))))
+          (should (equal (plist-get (car (funcall a)) :m) "changedCursorLocation"))
+          (should (seq-find (lambda (e) (equal (plist-get e :m) "initialize")) (funcall a)))
+          (should (seq-find (lambda (e) (equal (plist-get e :n) "textDocument/publishDiagnostics")) (funcall a)))
+          (kitty-lean-test--http url "call?page=pageA" (json-encode `((id . 0) (m . "createRpcSession") (a . [,uri]))))
+          (should (kitty-lean-test--wait 10 (lambda () (kitty-lean-test--answer a 0))))
+          (let ((session (plist-get (kitty-lean-test--answer a 0) :v)))
+            (should (stringp session))
+            (with-current-buffer buf
+              (goto-char (point-min)) (forward-line 3) (back-to-indentation))
+            ;; straight to the dispatcher, then at once a synchronous request:
+            ;; Lean's answer to the page comes while it waits, and jsonrpc runs
+            ;; the page's continuation later, outside the delivery
+            (kitty-lean-webview--call
+             "pageA"
+             (json-encode `((id . 1) (m . "sendClientRequest")
+                            (a . [,uri "$/lean/rpc/call"
+                                       ((sessionId . ,session) (method . "Lean.Widget.getInteractiveGoals")
+                                        (textDocument (uri . ,uri)) (position (line . 3) (character . 2))
+                                        (params (textDocument (uri . ,uri)) (position (line . 3) (character . 2))))]))))
+            (with-current-buffer buf
+              (jsonrpc-request (eglot--current-server-or-lose) :textDocument/hover
+                               (list :textDocument (list :uri uri) :position '(:line 2 :character 9))))
+            (should (kitty-lean-test--wait 30 (lambda () (kitty-lean-test--answer a 1))))
+            (let ((answer (kitty-lean-test--answer a 1)))
+              (should (equal (plist-get answer :k) "raw"))
+              (should (plist-get (plist-get (plist-get answer :v) :result) :goals))))
+          ;; page B called nothing and got nothing
+          (should-not (seq-find (lambda (e) (plist-get e :id)) (funcall b)))
+          ;; B's id 0 is B's own
+          (kitty-lean-test--http url "call?page=pageB" (json-encode '((id . 0) (m . "saveConfig") (a . [nil]))))
+          (should (kitty-lean-test--wait 5 (lambda () (kitty-lean-test--answer b 0))))
+          (should (stringp (plist-get (kitty-lean-test--answer a 0) :v))))
+      (funcall a t) (funcall b t)
+      (kitty-lean-webview-stop))))
+
+(ert-deftest kitty-lean-webview-answers-wait-for-the-stream ()
+  "An answer for a page whose stream is down waits; it comes when the stream is back."
+  (let ((url (kitty-lean-webview--start)))
+    (unwind-protect
+        (progn
+          (kitty-lean-test--http url "call?page=P" (json-encode '((id . 7) (m . "saveConfig") (a . [nil]))))
+          (let ((s (kitty-lean-test--stream url "P")))
+            (should (kitty-lean-test--wait 5 (lambda () (kitty-lean-test--answer s 7))))
+            (funcall s t)))
+      (kitty-lean-webview-stop))))
+
+(ert-deftest kitty-lean-webview-pages-come-and-go ()
+  "A stream the page closed is down, not an error in Lean's hooks; a page that
+never opens its stream is forgotten too; the hello waits for a Lean server."
+  (let ((url (kitty-lean-webview--start))
+        (kitty-lean-webview-page-timeout 0)
+        (server nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'kitty-lean-webview--hello) (lambda (_) server)))
+          (let ((s (kitty-lean-test--stream url "A")))
+            (should (kitty-lean-test--wait 5 (lambda () (gethash "A" kitty-lean-webview--pages))))
+            (let ((page (gethash "A" kitty-lean-webview--pages)))
+              (should-not (kitty-lean-webview--page-greeted page))   ; no server yet
+              (setq server t)
+              (kitty-lean-webview--on-server)
+              (should (kitty-lean-webview--page-greeted page))
+              ;; the page goes; Emacs writes before it has read that (more
+              ;; writes would kill a batch Emacs with SIGPIPE; an
+              ;; interactive one ignores it, and the write errors instead)
+              (funcall s t)
+              (kitty-lean-webview--send page "{}")
+              (should (kitty-lean-test--wait 5 (lambda () (null (kitty-lean-webview--page-stream page)))))
+              (kitty-lean-webview--send page "{}")
+              (should (equal (kitty-lean-webview--page-outbox page) '("{}")))
+              ;; and a write that fails is a stream down, not an error
+              (let ((proc (make-pipe-process :name "dead" :noquery t)))
+                (delete-process proc)
+                (setf (kitty-lean-webview--page-stream page) proc)
+                (cl-letf (((symbol-function 'process-live-p) (lambda (_) t)))
+                  (kitty-lean-webview--send page "{}"))
+                (should-not (kitty-lean-webview--page-stream page)))))
+          ;; a page that only ever POSTed
+          (kitty-lean-test--http url "call?page=B" (json-encode '((id . 0) (m . "saveConfig") (a . [nil]))))
+          (should (gethash "B" kitty-lean-webview--pages))
+          (kitty-lean-test--wait 0.1 #'ignore)
+          (kitty-lean-webview--tick)
+          (should-not (gethash "A" kitty-lean-webview--pages))
+          (should-not (gethash "B" kitty-lean-webview--pages))
+          ;; A comes back: its calls are dropped, its stream says reload
+          (kitty-lean-test--http url "call?page=A" (json-encode '((id . 3) (m . "saveConfig") (a . [nil]))))
+          (should-not (gethash "A" kitty-lean-webview--pages))
+          (let ((s (kitty-lean-test--stream url "A")))
+            (should (kitty-lean-test--wait 5 (lambda () (equal (funcall s) '((:reload t))))))
+            (funcall s t)))
+      (kitty-lean-webview-stop))))
+
+(ert-deftest kitty-lean-webview-answers-are-leans-json ()
+  "A page's answer is the JSON Lean sent ({} stays {}), even when jsonrpc runs
+its continuation later, outside the delivery (a synchronous request waiting)."
+  (let ((kitty-lean-webview--pages (make-hash-table :test #'equal))
+        (kitty-lean-webview--wanted (make-hash-table :test #'equal))
+        (sent nil) (success nil))
+    (cl-letf (((symbol-function 'kitty-lean--buffer-for-uri) (lambda (_) (current-buffer)))
+              ((symbol-function 'eglot-current-server) (lambda () 'conn))
+              ((symbol-function 'kitty-lean--flush) #'ignore)
+              ((symbol-function 'jsonrpc-async-request)
+               (lambda (_s _m _p &rest args) (setq success (plist-get args :success-fn)) (list 42 nil)))
+              ((symbol-function 'kitty-lean-webview--send) (lambda (_page e) (push e sent))))
+      (kitty-lean-webview--call "P" "{\"id\":5,\"m\":\"sendClientRequest\",\"a\":[\"u\",\"m\",{}]}")
+      ;; Lean's answer is delivered; the continuation does not run yet
+      (kitty-lean-webview--keep-raw #'ignore 'conn '(:id 42 :result nil :jsonrpc-json "{\"id\":42,\"result\":{}}"))
+      (funcall success nil)
+      (should (equal sent '("{\"id\":5,\"k\":\"raw\",\"v\":{\"id\":42,\"result\":{}}}")))
+      (should (zerop (hash-table-count kitty-lean-webview--wanted))))))
