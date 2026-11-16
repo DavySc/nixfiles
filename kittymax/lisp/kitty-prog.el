@@ -111,8 +111,13 @@ clang refuses -fPIC (every DLL is position-independent there), so it goes."
   ;; Candidates that change as you type must be re-fetched, not filtered.
   (when (fboundp 'cape-wrap-buster)
     (advice-add 'eglot-completion-at-point :around #'cape-wrap-buster))
-  ;; JSON parsing in a Rust process: the biggest single latency win for LSP.
+  ;; emacs-lsp-booster buffers the servers' output outside Emacs.  Only that:
+  ;; its bytecode mode hands jsonrpc raw UTF-8 bytes (Lean's ⊢ arrives as
+  ;; \342\212\242) and no JSON for kitty-lean-webview to pass on, and Emacs 30+
+  ;; parses JSON natively anyway.
   (when (and (executable-find "emacs-lsp-booster") (require 'eglot-booster nil t))
+    (defvar eglot-booster-io-only)
+    (setq eglot-booster-io-only t)
     (eglot-booster-mode 1)))
 
 (defun kitty-eglot-ensure-for (program)

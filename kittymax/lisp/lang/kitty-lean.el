@@ -273,7 +273,8 @@ An element, not a symbol: a list that starts with a symbol is a conditional.
   "CAPABILITIES (eglot's) with Lean's own for a Lean SERVER."
   (if (not (kitty-lean--server-p server))
       capabilities
-    (append capabilities (list :lean (list :silentDiagnosticSupport t)))))
+    (append capabilities (list :lean (list :silentDiagnosticSupport t
+                                           :incrementalDiagnosticSupport t)))))
 
 (with-eval-after-load 'eglot
   (cl-defmethod eglot-initialization-options :around (server)
@@ -493,14 +494,87 @@ An element, not a symbol: a list that starts with a symbol is a conditional.
         (kitty-lean--draw-marks)))
     kept))
 
+;; Lean reports a file's diagnostics while it checks it, each time all of
+;; them unless the client takes them in pieces: a file with 2000 messages
+;; sent 420 MB of JSON, 3000 times a growing list, and kept Emacs busy for
+;; 30 s.  So kittymax takes them in pieces, as VS Code does
+;; (`incrementalDiagnosticSupport': a report with isIncremental adds to the
+;; ones of the same version), and hands flymake, the marks and
+;; `kitty-lean-diagnostics-functions' the whole list at most every
+;; `kitty-lean-diagnostics-interval' seconds: the first report at once, the
+;; latest when the interval is over.
+
+(defcustom kitty-lean-diagnostics-interval 0.1
+  "Seconds between two deliveries of a file's diagnostics while Lean checks it."
+  :type 'number)
+
+(defvar kitty-lean-diagnostics-functions nil
+  "Called with URI, VERSION and all of Lean's diagnostics (a vector, silent ones too)
+each time they are delivered.")
+
+(defvar kitty-lean--diagnostics (make-hash-table :test #'equal)
+  "URI -> (VERSION CHUNKS DIRTY TIMER): Lean's reports since its last full one,
+CHUNKS the vectors newest first.")
+
+(defvar kitty-lean--delivering nil
+  "Non-nil while kittymax hands eglot a file's whole list of diagnostics.")
+
+(defun kitty-lean--diagnostics-add (uri version incremental diagnostics)
+  "Lean's report for URI; non-nil when nothing is waiting to be delivered."
+  (let ((entry (or (gethash uri kitty-lean--diagnostics)
+                   (puthash uri (list version nil nil nil) kitty-lean--diagnostics))))
+    (cond
+     ((and incremental (equal (nth 0 entry) version))
+      (push diagnostics (nth 1 entry)))
+     ;; a late piece of a version already replaced: Lean's old checker
+     ;; can still report after an edit
+     ((and incremental (numberp version) (numberp (nth 0 entry)) (< version (nth 0 entry)))
+      nil)
+     (t (setf (nth 0 entry) version (nth 1 entry) (list diagnostics))))
+    (setf (nth 2 entry) t)
+    (not (nth 3 entry))))
+
+(defun kitty-lean--diagnostics-forget (&rest _)
+  "The buffer's file is closed on the server: its diagnostics go."
+  (let ((buffer (current-buffer)) gone)
+    (maphash (lambda (uri _) (when (eq (kitty-lean--buffer-for-uri uri) buffer) (push uri gone)))
+             kitty-lean--diagnostics)
+    (dolist (uri gone) (remhash uri kitty-lean--diagnostics))))
+
+(defun kitty-lean--diagnostics-all (uri)
+  "All of URI's diagnostics, as one vector (kept as one from now on)."
+  (when-let* ((entry (gethash uri kitty-lean--diagnostics)))
+    (let ((all (if (cdr (nth 1 entry)) (apply #'vconcat (reverse (nth 1 entry))) (car (nth 1 entry)))))
+      (setf (nth 1 entry) (list all))
+      all)))
+
+(defun kitty-lean--diagnostics-deliver (server uri)
+  "Give URI's diagnostics to the marks, the hooks and eglot (flymake), if new;
+then wait an interval before the next delivery."
+  (let ((entry (gethash uri kitty-lean--diagnostics)))
+    (when (and entry (nth 2 entry))
+      (setf (nth 2 entry) nil)
+      (let ((all (kitty-lean--diagnostics-all uri)) (version (nth 0 entry)))
+        (run-hook-with-args 'kitty-lean-diagnostics-functions uri version all)
+        (when (jsonrpc-running-p server)
+          (let ((kitty-lean--delivering t))
+            (eglot-handle-notification server 'textDocument/publishDiagnostics
+                                       :uri uri :version version
+                                       :diagnostics (kitty-lean--on-diagnostics uri all))))
+        (setf (nth 3 entry)
+              (run-at-time kitty-lean-diagnostics-interval nil
+                           (lambda ()
+                             (setf (nth 3 entry) nil)
+                             (kitty-lean--diagnostics-deliver server uri))))))))
+
 (with-eval-after-load 'eglot
+  (advice-add 'eglot--signal-textDocument/didClose :after #'kitty-lean--diagnostics-forget)
   (cl-defmethod eglot-handle-notification :around
-    (server (method (eql textDocument/publishDiagnostics)) &rest args &key uri diagnostics &allow-other-keys)
-    (if (not (kitty-lean--server-p server))
+    (server (_method (eql textDocument/publishDiagnostics)) &key uri version diagnostics isIncremental &allow-other-keys)
+    (if (or kitty-lean--delivering (not (kitty-lean--server-p server)))
         (cl-call-next-method)
-      (let ((args (copy-sequence args)))
-        (setq args (plist-put args :diagnostics (kitty-lean--on-diagnostics uri diagnostics)))
-        (apply #'cl-call-next-method server method args)))))
+      (when (kitty-lean--diagnostics-add uri version (eq isIncremental t) diagnostics)
+        (kitty-lean--diagnostics-deliver server uri)))))
 
 ;;;; The infoview
 
@@ -2243,7 +2317,11 @@ my-nvim's :LeanNew name [math]."
   "\\" '("how to type this" . kitty-lean-describe-symbol)
   "TAB" '("to the infoview" . kitty-lean-infoview-select)
   "v" '("infoview options" . kitty-lean-infoview-options)
-  "d d" '("colour goal changes" . kitty-lean-infoview-toggle-diffs))
+  "d d" '("colour goal changes" . kitty-lean-infoview-toggle-diffs)
+  "w" '("VS Code's infoview" . kitty-lean-webview))
+
+(autoload 'kitty-lean-webview "kitty-lean-webview"
+  "VS Code's own infoview for the Lean files: in a webview, or a browser." t)
 
 (kitty-local-leader 'nael-mode
   "m" '("lake build" . kitty-lean-build)

@@ -13,7 +13,15 @@
   sqldiff ? null,
 }:
 let
-  emacsPkg = pkgs.emacs-pgtk; # Wayland/WSLg; native compilation is on by default
+  emacsPkg = pkgs.emacs-pgtk; # Wayland/WSLg; native compilation is on by default; with xwidgets (webviews)
+
+  # VS Code's Lean infoview (vscode-lean4's @leanprover/infoview, the React page
+  # VS Code shows), for kitty-lean-webview.el: `\w` opens it beside the code,
+  # in an xwidget webview (or a browser from a terminal).  Built JavaScript from npm.
+  leanInfoview = pkgs.fetchzip {
+    url = "https://registry.npmjs.org/@leanprover/infoview/-/infoview-0.14.0.tgz";
+    hash = "sha256-B0BvdJ0chT3DTK5cREMZmtxXCmjV5YEmqv59fIX1Z7s=";
+  };
 
   packageList =
     epkgs: with epkgs; [
@@ -165,10 +173,11 @@ pkgs.symlinkJoin {
       --add-flags '--init-directory "$kittymax_dir"' \
       --suffix PATH : ${pkgs.lib.makeBinPath tools} \
       --set KITTYMAX_PACKAGES nix \
-      --set-default ENCHANT_PREFIX_DIR ${pkgs.enchant}
+      --set-default ENCHANT_PREFIX_DIR ${pkgs.enchant} \
+      --set-default KITTYMAX_LEAN_INFOVIEW ${leanInfoview}/dist
   '';
   passthru = {
-    inherit emacsWithPackages packageList tools;
+    inherit emacsWithPackages packageList tools leanInfoview;
   };
   meta.mainProgram = "kittymax";
 }
