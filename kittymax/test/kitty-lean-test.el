@@ -74,6 +74,7 @@ error: build failed
   "Answers for an older request never overwrite a newer one, whatever their order;
 a failed answer leaves the infoview as it was."
   (let* ((calls nil)
+         (released nil)
          (rendered nil)
          (buf (generate-new-buffer "x.lean")))
     (cl-letf (((symbol-function 'kitty-lean--infoview-window) (lambda () t))
@@ -83,6 +84,7 @@ a failed answer leaves the infoview as it was."
               ((symbol-function 'kitty-lean--ask-term) (lambda (_b pos cb) (push (list :term pos cb) calls)))
               ((symbol-function 'kitty-lean--ask-messages) (lambda (_b pos cb) (push (list :messages pos cb) calls)))
               ((symbol-function 'kitty-lean--ask-widgets) (lambda (_b pos cb) (push (list :widgets pos cb) calls)))
+              ((symbol-function 'kitty-lean--release) (lambda (_b _s refs) (setq released (append refs released))))
               ((symbol-function 'kitty-lean--render)
                (lambda (_b pos parts) (push (cons pos (plist-get parts :goals)) rendered))))
       (with-current-buffer buf
@@ -99,11 +101,15 @@ a failed answer leaves the infoview as it was."
         (cl-flet ((answer (pos &optional fail)
                     (dolist (c calls)
                       (when (= (nth 1 c) pos)
-                        (funcall (nth 2 c) (if fail (cons nil nil) (cons t (list (format "goal at %d" pos)))))))))
+                        (funcall (nth 2 c) (if fail (cons nil nil)
+                                             (cons t (list (list :type (list :tag (vector (list :info (list :p (format "%d" pos))) '(:text "x"))))))))))))
           ;; the newer request is answered first, the older one after it
           (answer 20)
           (answer 5))
-        (should (equal rendered '((20 "goal at 20"))))
+        (should (equal (mapcar #'car rendered) '(20)))
+        ;; the older refresh is not shown: what its answers hold is released
+        ;; (four answers, each with the reference (:p "5"))
+        (should (equal released (make-list 4 '(:p "5"))))
         ;; forced (Lean finished the file): asked again; this time it fails
         (setq calls nil)
         (kitty-lean-infoview-refresh buf t)
@@ -1156,7 +1162,7 @@ it stays open across refreshes; sections fold with TAB."
     ;; All messages: folded, opened on request
     (kitty-lean-test--iv-goto "All messages")
     (with-current-buffer kitty-lean-infoview-buffer-name (kitty-lean-infoview-toggle-fold))
-    (should (string-match-p "▾ All messages: 0 errors, 0 warnings, 1 info.*\n2:27 info (trace)" (kitty-lean-test--visible)))
+    (should (string-match-p "▾ All messages: 0 errors, 0 warnings, 1 info.*\n2:27 info (trace: unfold it in the infoview" (kitty-lean-test--visible)))
     (clrhash kitty-lean--folds)))
 
 (ert-deftest kitty-lean-a-late-trace-answer-is-dropped-and-released ()
@@ -1309,3 +1315,61 @@ of JavaScript only says so."
       (should (equal (show g1 g2) "▾ case h\nx : Nat := 5\ny : Nat\n⊢ x = y\n\n▾ goal 2 of 2\n⊢ True\n\n"))
       (let ((kitty-lean-infoview-emphasize-first-goal t))
         (should (equal (show g1 g2) "▾ case h\nx : Nat := 5\ny : Nat\n⊢ x = y\n\n▸ Other goals (1)\n"))))))
+
+(ert-deftest kitty-lean-review-fixes ()
+  "What the review of the rendering found: references outside a proof,
+TAB at the end of a closed title, edits that start at one place."
+  ;; outside a proof the goals are :none: the other answers' references count
+  (should (= 3 (length (kitty-lean--answer-refs
+                        (list :goals :none :term nil
+                              :pins (list (cl-list* 'm "1:0" (list '(:type (:tag [(:info (:p "1")) (:text "a")])))))
+                              :messages (list (list nil 1 '(:tag [(:info (:p "2")) (:text "b")])))
+                              :widgets (list '(:id "w" :props (:x (:p "3")))))))))
+  ;; TAB anywhere on a closed fold's line, even past its end, is that fold
+  (with-temp-buffer
+    (let ((kitty-lean--fold-path nil) (kitty-lean--pending-fills nil) ov)
+      (setq ov (kitty-lean--fold '(a) t (lambda () (insert "Expected type")) (lambda () (insert "\n⊢ True"))))
+      (insert "\n\n")
+      (kitty-lean--fold '(b) t (lambda () (insert "  [c] trace")) nil (lambda (_) nil))
+      (kitty-lean--fold-set ov nil)
+      (goto-char (overlay-end ov))
+      (should (eq (kitty-lean--fold-at-point) ov))
+      (goto-char (point-max))
+      (should-not (eq (kitty-lean--fold-at-point) ov))
+      (should (kitty-lean--fold-at-point))))
+  ;; LSP edits all speak of the text before any: in their order
+  (with-temp-buffer
+    (insert "abc")
+    (cl-letf (((symbol-function 'kitty-lean--lsp-point)
+               (lambda (_b p) (+ 1 (plist-get p :character))))
+              ((symbol-function 'select-window) #'ignore)
+              ((symbol-function 'display-buffer) #'ignore))
+      (kitty-lean-widgets--apply (current-buffer)
+                                 (list '(:range (:start (:line 0 :character 0) :end (:line 0 :character 0)) :newText "X")
+                                       '(:range (:start (:line 0 :character 0) :end (:line 0 :character 1)) :newText "Y")
+                                       '(:range (:start (:line 0 :character 3) :end (:line 0 :character 3)) :newText "A")
+                                       '(:range (:start (:line 0 :character 3) :end (:line 0 :character 3)) :newText "B"))))
+    (should (equal (buffer-string) "XYbcAB")))
+  ;; two alike traces under one parent are two folds
+  (with-temp-buffer
+    (let ((kitty-lean--fold-path nil) (kitty-lean--pending-fills nil) (kitty-lean--refs nil))
+      (clrhash kitty-lean--folds)
+      (kitty-lean--insert-trace-children
+       (vector '(:tag [(:trace (:cls "c" :indent 0 :collapsed t :msg (:text "same") :children (:strict [(:text "x")]))) (:text "")])
+               '(:tag [(:trace (:cls "c" :indent 0 :collapsed t :msg (:text "same") :children (:strict [(:text "y")]))) (:text "")]))
+       "p")
+      (goto-char (point-min)) (search-forward "same")
+      (kitty-lean-infoview-toggle-fold)
+      (should (= 1 (hash-table-count kitty-lean--folds)))
+      (clrhash kitty-lean--folds))))
+
+(ert-deftest kitty-lean-marks-are-cheap ()
+  "Proof marks for a long file: one pass, not one per mark from the top."
+  (with-temp-buffer
+    (dotimes (_ 20000) (insert "  simp\n"))
+    (setq kitty-lean--marks (cons (number-sequence 0 19990 10) nil))
+    (let ((t0 (float-time)))
+      (kitty-lean--draw-marks)
+      (should (< (- (float-time) t0) 0.3)))
+    (should (= 2000 (length kitty-lean--mark-overlays)))
+    (should (= 11 (line-number-at-pos (overlay-start (nth 1998 kitty-lean--mark-overlays)))))))

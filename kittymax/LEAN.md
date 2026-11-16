@@ -11,7 +11,7 @@ abbreviations, eglot setup for `lake serve`), eglot (the LSP client),
 below), `lisp/lang/kitty-lean-widgets.el` (Lean's widgets as text), elan from Nix to fetch each project's toolchain.
 
 Tested against Lean 4.35 and a real Lake project in `test/kitty-lean-test.el`
-(49 tests): the server, diagnostics, the infoview, progress, completion,
+(51 tests): the server, diagnostics, the infoview, progress, completion,
 definitions, hovers, `\` input, sorry, `Try this`, restart, `lake build` and
 run, and Org blocks with `C-c '`. Most of the rest are regression tests from
 two reviews that tried each feature against real Lean: K on subterms, session
@@ -83,7 +83,7 @@ checks that it rejects the broken versions that the reviews found.
 | Collapse goals and sections | `TAB` (or `za`, or a click on ▾ ▸) folds a section, a goal (each titled by its case when there are several), a trace node, a widget's `<details>`; folds stay as you left them across refreshes | done |
 | Copy a goal to the editor / as a comment | yank from the infoview buffer | partial |
 | Widgets: `Try this` buttons, ProofWidgets, `conv?` shift-click, user widgets (React) | drawn as text from the widget's data (lean.nvim's way): `Try this` `[apply]` buttons (`RET` / click; refused if the file changed since), error-code explanations, ProofWidgets HTML (headings, lists, bold / italic / code, colours, links, tables, `<details>`, MakeEditLink, interactive terms) and `<svg>` as an image in a graphical Emacs. Widgets that need their own JavaScript (Penrose diagrams, `conv?`'s selection panel, plots, custom React) show their name and that they need VS Code | partial |
-| Trace explorer (expandable `trace` messages) | each trace node a fold, classes shortened under their parent; children asked from Lean only when opened (`lazyTraceChildrenToInteractive`, as VS Code); no trace search | done (no search) |
+| Trace explorer (expandable `trace` messages) | each trace node a fold, classes shortened under their parent; children asked from Lean only when opened (`lazyTraceChildrenToInteractive`, as VS Code), and again on each refresh while open (VS Code keeps them); flymake's copy of a trace message is "(trace: unfold it in the infoview)", since Lean sends only "(trace)" once widgets are on, as VS Code's Problems shows it; no trace search | done (no search) |
 | Theming | your Emacs theme's faces | done |
 
 ## Projects, Lake, elan

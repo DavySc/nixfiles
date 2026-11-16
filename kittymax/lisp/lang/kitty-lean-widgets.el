@@ -91,22 +91,22 @@ asked again and the button does nothing: Lean's ranges are for that text."
       (save-restriction
         (widen)
         (undo-boundary)
-        ;; from the end, so the earlier ranges stay right
-        (dolist (e (sort (append edits nil)
-                         (lambda (a b)
-                           (let ((pa (plist-get (plist-get a :range) :start))
-                                 (pb (plist-get (plist-get b :range) :start)))
-                             (or (> (plist-get pa :line) (plist-get pb :line))
-                                 (and (= (plist-get pa :line) (plist-get pb :line))
-                                      (> (plist-get pa :character) (plist-get pb :character))))))))
-          (let* ((range (plist-get e :range))
-                 (beg (kitty-lean--lsp-point buffer (plist-get range :start)))
-                 (end (kitty-lean--lsp-point buffer (plist-get range :end))))
+        ;; Every range is in the text before any edit (LSP): all are found
+        ;; first, as markers that move past what is put in at them, then
+        ;; the edits go in their order (two inserts at one place: in order)
+        (let ((spans (mapcar (lambda (e)
+                               (let ((range (plist-get e :range)))
+                                 (list (copy-marker (kitty-lean--lsp-point buffer (plist-get range :start)) t)
+                                       (copy-marker (kitty-lean--lsp-point buffer (plist-get range :end)) t)
+                                       (plist-get e :newText))))
+                             (append edits nil))))
+          (pcase-dolist (`(,beg ,end ,text) spans)
             (save-excursion
               (goto-char beg)
               (delete-region beg end)
-              (insert (plist-get e :newText))
-              (unless last (setq last (point-marker))))))
+              (insert text)
+              (setq last (point-marker))))
+          (pcase-dolist (`(,beg ,end ,_) spans) (set-marker beg nil) (set-marker end nil)))
         (when selection
           (setq last (copy-marker (kitty-lean--lsp-point buffer (plist-get selection :start)))))))
     (let ((w (or (get-buffer-window buffer) (display-buffer buffer))))

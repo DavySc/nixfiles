@@ -56,6 +56,7 @@ if command -v tlc >/dev/null 2>&1; then
     tlc_case folds kitty_lean_folds pass
     tlc_case folds-no-render-check kitty_lean_folds fail '' 's|Bug = "none"|Bug = "norender"|'
     tlc_case folds-late-answer-kept kitty_lean_folds fail '' 's|Bug = "none"|Bug = "norelease"|'
+    tlc_case folds-unrendered-refresh-kept kitty_lean_folds fail '' 's|Bug = "none"|Bug = "nodrop"|'
     tlc_case folds-button-any-text kitty_lean_folds fail '' 's|Bug = "none"|Bug = "notick"|'
     tlc_case start-waiters-not-rearmed kitty_lean_start fail 's|/\\ ensure'"'"' = ensure \\cup {g \\in waiting : buf\[g\] = "open"}|/\\ UNCHANGED ensure|'
     rm -rf "$tmp"

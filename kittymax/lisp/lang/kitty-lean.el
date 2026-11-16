@@ -437,7 +437,13 @@ An element, not a symbol: a list that starts with a symbol is a conditional.
         (push (plist-get (plist-get (plist-get d :range) :start) :line) done))
       (when (kitty-lean--tagged-p d 1)
         (push (kitty-lean--end-line (or (plist-get d :fullRange) (plist-get d :range))) unsolved))
-      (unless (eq (plist-get d :isSilent) t) (push d kept)))
+      (unless (eq (plist-get d :isSilent) t)
+        ;; with widgets on, Lean's plain text of a trace is just "(trace)"
+        ;; (as VS Code's Problems shows it): say where the trace is
+        (push (if (equal (plist-get d :message) "(trace)")
+                  (plist-put (copy-sequence d) :message "(trace: unfold it in the infoview, \\ TAB)")
+                d)
+              kept)))
     (list (vconcat (nreverse kept)) done unsolved)))
 
 (defun kitty-lean--draw-marks ()
@@ -449,11 +455,17 @@ An element, not a symbol: a list that starts with a symbol is a conditional.
         (widen)
         (let ((lines (count-lines (point-min) (point-max)))
               (gui (display-graphic-p)))
+          ;; one pass down the buffer, however many marks
+          (let ((here 0) (lines-at (make-hash-table)))
+            (goto-char (point-min))
+            (dolist (line (sort (delete-dups (append (car kitty-lean--marks) (cdr kitty-lean--marks) nil)) #'<))
+              (when (< line (max 1 lines))
+                (forward-line (- line here))
+                (setq here line)
+                (puthash line (line-end-position) lines-at)))
           (cl-flet ((at (line)
-                      (when (< line (max 1 lines))
-                        (goto-char (point-min))
-                        (forward-line line)
-                        (let ((ov (make-overlay (line-end-position) (line-end-position))))
+                      (when-let* ((pos (gethash line lines-at)))
+                        (let ((ov (make-overlay pos pos)))
                           (overlay-put ov 'kitty-lean-mark t)
                           (push ov kitty-lean--mark-overlays)
                           ov))))
@@ -470,7 +482,7 @@ An element, not a symbol: a list that starts with a symbol is a conditional.
                 ;; before eol diagnostics (an after-string at the same place)
                 (overlay-put ov 'priority 10)
                 (overlay-put ov 'before-string (propertize kitty-lean-unsolved-mark 'face 'kitty-lean-unsolved
-                                                           'help-echo "Lean: goals left here"))))))))))
+                                                           'help-echo "Lean: goals left here")))))))))))
 
 (defun kitty-lean--on-diagnostics (uri diagnostics)
   "Lean's DIAGNOSTICS for URI: the marks drawn, the silent ones taken out (returned)."
@@ -677,6 +689,15 @@ session they are gone with it, so the infoview is asked again instead."
       (walk json))
     refs))
 
+(defun kitty-lean--answer-refs (parts)
+  "The references in the answers PARTS of a refresh (a vector, so that an
+answer of :none is not taken for a plist key)."
+  (kitty-lean--json-refs
+   (vector (plist-get parts :goals) (plist-get parts :term)
+           (vconcat (mapcar #'cddr (plist-get parts :pins)))
+           (vconcat (plist-get parts :messages))
+           (vconcat (plist-get parts :widgets)))))
+
 (defun kitty-lean--release (buffer session refs)
   "Tell Lean the references REFS of BUFFER's SESSION are no longer needed."
   (when (and refs (buffer-live-p buffer))
@@ -804,9 +825,10 @@ time the fold is open, that fills it (now, or later from an answer, with
     (let* ((bbeg (point))
            (_ (let ((kitty-lean--fold-path key)) (when body (funcall body))))
            (ov (make-overlay bbeg (point))))
-      (add-text-properties tbeg bbeg (list 'kitty-lean-fold ov 'mouse-face 'highlight
-                                           'keymap kitty-lean--fold-title-map
-                                           'help-echo "TAB, mouse-1: fold / unfold"))
+      (put-text-property tbeg bbeg 'kitty-lean-fold ov)
+      (kitty-lean--put-unset tbeg bbeg 'mouse-face 'highlight)
+      (kitty-lean--put-unset tbeg bbeg 'keymap kitty-lean--fold-title-map)
+      (kitty-lean--put-unset tbeg bbeg 'help-echo "TAB, mouse-1: fold / unfold")
       (overlay-put ov 'kitty-lean-fold-body t)
       (overlay-put ov 'kitty-lean-key key)
       (overlay-put ov 'kitty-lean-title (copy-marker tbeg))
@@ -823,6 +845,8 @@ time the fold is open, that fills it (now, or later from an answer, with
   "Open (OPEN non-nil) or close the fold whose body is OV."
   (let ((inhibit-read-only t)
         (title (overlay-get ov 'kitty-lean-title)))
+    ;; how folds were left is a convenience, not a record: kept small
+    (when (> (hash-table-count kitty-lean--folds) 500) (clrhash kitty-lean--folds))
     (overlay-put ov 'invisible (not open))
     (puthash (overlay-get ov 'kitty-lean-key) (if open 'open 'closed) kitty-lean--folds)
     (when (and (marker-buffer title) (memq (char-after title) '(?▾ ?▸)))
@@ -871,12 +895,23 @@ the rest of the render."
         (funcall fill ov)))))
 
 (defun kitty-lean--fold-at-point ()
-  "The fold body overlay of the title on this line, or of the fold point is in."
-  (or (get-text-property (point) 'kitty-lean-fold)
-      (let ((pos (next-single-property-change (line-beginning-position) 'kitty-lean-fold nil (line-end-position))))
-        (and pos (< pos (line-end-position)) (get-text-property pos 'kitty-lean-fold)))
-      (car (sort (seq-filter (lambda (o) (overlay-get o 'kitty-lean-fold-body)) (overlays-at (point)))
-                 (lambda (a b) (< (- (overlay-end a) (overlay-start a)) (- (overlay-end b) (overlay-start b))))))))
+  "The fold body overlay of the title on this line, or of the fold point is in.
+Point in hidden text (the end of a closed fold's line) counts as on its title."
+  (save-excursion
+    (while (and (> (point) (point-min)) (invisible-p (point)) (invisible-p (1- (point))))
+      (backward-char))
+    (when (and (> (point) (point-min)) (invisible-p (point))) (backward-char))
+    (let ((bol (save-excursion (beginning-of-line) (point)))
+          (eol (save-excursion (skip-chars-forward "^\n") (point))))
+      (or (get-text-property (point) 'kitty-lean-fold)
+          ;; the title on this line, wherever point is on it
+          (cl-loop for pos = bol then (next-single-property-change pos 'kitty-lean-fold nil eol)
+                   while (and pos (< pos eol))
+                   thereis (get-text-property pos 'kitty-lean-fold))
+          (car (sort (seq-filter (lambda (o) (and (overlay-get o 'kitty-lean-fold-body)
+                                                  (< (overlay-start o) (point) (1+ (overlay-end o)))))
+                                 (overlays-in (max (point-min) (1- (point))) (min (point-max) (1+ (point)))))
+                     (lambda (a b) (< (- (overlay-end a) (overlay-start a)) (- (overlay-end b) (overlay-start b))))))))))
 
 (defun kitty-lean-infoview-toggle-fold (&optional event)
   "Fold or unfold the section, goal or trace here (VS Code's ▾ ▸)."
@@ -900,9 +935,14 @@ the rest of the render."
 
 (defvar kitty-lean--trace-cls nil "The class of the trace node around the one being inserted.")
 
+(defvar kitty-lean--trace-index nil "Which child of its parent the trace being inserted is.")
+
 (defun kitty-lean--insert-trace-children (children cls)
-  (let ((kitty-lean--trace-cls cls))
-    (seq-do (lambda (c) (insert "\n") (kitty-lean--insert-tagged c)) children)))
+  (let ((kitty-lean--trace-cls cls) (i 0))
+    (seq-do (lambda (c)
+              (insert "\n")
+              (let ((kitty-lean--trace-index (cl-incf i))) (kitty-lean--insert-tagged c)))
+            children)))
 
 (defun kitty-lean--insert-trace (trace)
   "A trace node: [class] message, its children folded under it (fetched when opened)."
@@ -920,7 +960,9 @@ the rest of the render."
     (if (and (not lazy) (seq-empty-p strict))
         (progn (insert "  ") (funcall title))
       (kitty-lean--fold
-       (list 'trace cls (kitty-lean--tagged-plain (plist-get trace :msg)))
+       ;; two alike under one parent are two folds: where it is is part of its name
+       (list 'trace kitty-lean--trace-index cls
+             (truncate-string-to-width (kitty-lean--tagged-plain (plist-get trace :msg)) 200))
        (not (eq (plist-get trace :collapsed) t))
        title
        (and (not lazy) (lambda () (kitty-lean--insert-trace-children strict cls)))
@@ -1031,7 +1073,8 @@ others folded away under \"Other goals\"."
                   (if (= n 1)
                       (kitty-lean--insert-goal g)
                     (kitty-lean--fold
-                     (list 'goal key i (and (consp g) (plist-get g :userName))) t
+                     ;; this goal (its metavariable), not every `case right' anywhere
+                     (list 'goal key i (and (consp g) (or (plist-get g :mvarId) (plist-get g :userName)))) t
                      (lambda () (insert (propertize (kitty-lean--goal-title g i n)
                                                     'kitty-lean-face 'kitty-lean-infoview-case)))
                      (lambda ()
@@ -1382,7 +1425,13 @@ say so, instead of an empty infoview or another file's goals."
             (with-current-buffer (get-buffer kitty-lean-infoview-buffer-name)
               (let ((b (point)))
                 (insert (propertize (format "%d:%d %s" (1+ (plist-get (plist-get range :start) :line))
-                                            (plist-get (plist-get range :start) :character)
+                                            ;; the column as the Messages section and Emacs count it
+                                            (with-current-buffer buffer
+                                              (save-excursion
+                                                (save-restriction
+                                                  (widen)
+                                                  (goto-char (kitty-lean--lsp-point buffer (plist-get range :start)))
+                                                  (current-column))))
                                             (kitty-lean--severity (plist-get lsp :severity)))
                                     'face (kitty-lean--severity-face (plist-get lsp :severity)))
                         " " (car (split-string text "\n")) "\n")
@@ -1496,10 +1545,8 @@ PARTS: plist :goals (interactive goals, or plain strings) :term :messages
       ;; trace's children, a widget's props hold some too
       (setq kitty-lean--shown-refs
             (list buffer (buffer-local-value 'kitty-lean--rpc-session buffer)
-                  (delete-dups (kitty-lean--json-refs
-                                (list goals term (mapcar #'cddr (plist-get parts :pins))
-                                      (mapcar (lambda (m) (nth 2 m)) messages)
-                                      widgets)))))
+                  ;; each occurrence: Lean counts a reference once per time it sends it
+                  (kitty-lean--answer-refs parts)))
       ;; the open lazy folds: a trace's children, all messages
       (with-current-buffer iv
         (let ((kitty-lean--pending-fills fills)) (kitty-lean--run-fills))))))
@@ -1614,6 +1661,7 @@ Skipped when the infoview is closed or paused, or (unless FORCE) when nothing mo
                 kitty-lean--source buffer)
           (when (kitty-lean-busy-p buffer) (kitty-lean--placeholder buffer))
           (let* ((gen (cl-incf kitty-lean--gen))
+                 (session (buffer-local-value 'kitty-lean--rpc-session buffer))
                  (pins (seq-filter (lambda (m) (kitty-lean--pin-live-p m)) kitty-lean--pins))
                  (want (+ 4 (length pins)))
                  (parts (list :tick (nth 2 key)))
@@ -1623,10 +1671,13 @@ Skipped when the infoview is closed or paused, or (unless FORCE) when nothing mo
                            (if (eq key :pins)
                                (setq parts (plist-put parts :pins (cons (cdr answer) (plist-get parts :pins))))
                              (setq parts (plist-put parts key (cdr answer)))))
-                         (when (and (zerop (cl-decf want)) (= gen kitty-lean--gen) (not failed)
+                         (when (zerop (cl-decf want))
+                           (if (and (= gen kitty-lean--gen) (not failed)
                                     ;; paused while the answers were on their way
                                     (not kitty-lean--paused))
-                           (kitty-lean--render buffer pos parts)))))
+                               (kitty-lean--render buffer pos parts)
+                             ;; not shown: Lean can forget what they hold
+                             (kitty-lean--release buffer session (kitty-lean--answer-refs parts)))))))
             (kitty-lean--ask-goals buffer pos (lambda (a) (funcall done :goals a)))
             (kitty-lean--ask-term buffer pos (lambda (a) (funcall done :term a)))
             (kitty-lean--ask-messages buffer pos (lambda (a) (funcall done :messages a)))
