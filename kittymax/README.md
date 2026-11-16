@@ -362,7 +362,12 @@ here, `c` clear pins, `p` pause, `TAB` to the infoview, `v` its options,
 accept `Try this`, `S` a `sorry` per goal, `u` symbols, `\\` how to type the
 symbol under the cursor, `l` Loogle, `/` grep Lean's and the dependencies'
 sources, `f` their files. `:Lake build`, `:LeanNew name [math]` as in my-nvim.
-In the infoview: `RET` / `gd` definition, `K` type and docs, `p` pause, `q`.
+In the infoview: `RET` / `gd` definition (on a message or pin: go there),
+`K` type and docs, `u` unpin the pin under the cursor, `p` pause, `q`.
+
+As in VS Code, opening a file does not build its imports: Lean says they are
+out of date and `\r` builds them (`kitty-lean-build-dependencies` to build
+on open). `SPC m m` fetches the Mathlib cache first in a Mathlib project.
 
 Dependencies and the toolchain open read-only. A Lean block in Org:
 

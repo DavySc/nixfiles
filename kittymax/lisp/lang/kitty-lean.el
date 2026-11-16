@@ -115,85 +115,90 @@ A stray edit there breaks every project that uses it (lean.nvim's rule)."
   ;; revert-buffer starts the mode again, forgetting the progress marks
   (add-hook 'change-major-mode-hook #'kitty-lean--remove-progress nil t)
   ;; The org block's C-c ' buffer starts its server itself (below).
+  (kitty-lean--show-start)
+  (add-hook 'kill-buffer-hook #'kitty-lean--source-closed nil t)
   (when buffer-file-name
     (kitty-lean--ensure-server)))
 (kitty-add-hook 'nael-mode-hook #'kitty--lean-setup)
 
-;; eglot registers a server only once it has answered `initialize'; a second
-;; Lean file opened before that (two files at once, a jump to a definition
-;; while `lake serve' starts) would start a second server for the project,
-;; and one of the two exits, leaving its files without one.  While a start
-;; is on its way, other files wait for it: eglot takes every file of the
-;; project when the server is up.
+;; eglot registers a server only once it has answered `initialize'; a Lean
+;; file whose eglot-ensure runs before that (two files at once, a jump to a
+;; definition while `lake serve' starts) would launch a second server for
+;; the project, and one of the two exits, leaving its files without one.
+;; So every Lean buffer keeps its own eglot-ensure, and a launch is skipped
+;; while one is on its way: eglot takes every buffer of the project when
+;; the server is up.  If the start fails, the buffers that skipped theirs
+;; try again after their next command.  test/kitty_lean_start.tla is its
+;; model.
 (defvar kitty-lean--starts (make-hash-table :test #'equal)
-  "Project root -> plist of a server start in progress:
-:starter the buffer whose eglot-ensure starts it, :waiting the other Lean
-buffers of the project opened meanwhile, :since when, :server once eglot
-has launched it.  test/kitty_lean_start.tla is its model.")
+  "Project root -> plist of a server launch on its way: :server once eglot
+made it, :waiting the Lean buffers that skipped their own launch for it.")
 
-(defconst kitty-lean--start-patience 120
-  "Seconds after which a start nobody heard of again is not waited for.")
+(defcustom kitty-lean-connect-timeout nil
+  "Seconds to wait for `lake serve' to answer, or nil to wait as long as it takes.
+eglot's own default, 30 s, kills a first start that is still fetching the
+toolchain (elan) or cloning the dependencies (lake)."
+  :type '(choice (const :tag "As long as it takes" nil) number)
+  :group 'kittymax)
+
+(defvar kitty-lean--told-no-lake nil)
+(defvar kitty-lean--start-timer nil)
+(defvar eglot-connect-timeout)
 
 (defun kitty-lean--project-key ()
   (file-truename (or (ignore-errors (project-root (project-current))) default-directory)))
 
-(declare-function eglot--connect "eglot")
-(declare-function eglot--guess-contact "eglot")
-
-(defun kitty-lean--start-here (key)
-  "Start the project's server from this buffer, noting it under KEY."
-  (puthash key (list :starter (current-buffer) :waiting nil :since (float-time)) kitty-lean--starts)
-  (add-hook 'kill-buffer-hook #'kitty-lean--starter-gone nil t))
-
 (defun kitty-lean--ensure-server ()
-  "eglot for this buffer, unless its project's server is already starting."
-  (when (executable-find "lake")
+  "eglot for this buffer, after its next command, as for any language;
+`kitty-lean--launch' sees that the project gets one server."
+  (if (executable-find "lake")
+      (kitty-eglot-ensure-for "lake")
+    (unless kitty-lean--told-no-lake
+      (setq kitty-lean--told-no-lake t)
+      (message "Lean: `lake' is not on PATH, so Lean files get no server; install elan (https://github.com/leanprover/elan)"))))
+
+(defun kitty-lean--starting (key)
+  "The launch on its way for the project KEY, if its server still runs."
+  (when-let* ((start (gethash key kitty-lean--starts)))
+    (let ((server (plist-get start :server)))
+      (if (or (null server) (jsonrpc-running-p server))
+          start
+        (remhash key kitty-lean--starts)
+        nil))))
+
+(defun kitty-lean--launch (connect &rest args)
+  "eglot's connect, from a Lean buffer: skipped while the project's server
+is starting (this buffer is taken when it is up); with Lean's patience."
+  (if (not (derived-mode-p 'nael-mode))
+      (apply connect args)
     (let* ((key (kitty-lean--project-key))
-           (start (gethash key kitty-lean--starts)))
-      (cond
-       ;; a server is up: eglot takes this buffer after the mode hooks
-       ((and (fboundp 'eglot-current-server) (eglot-current-server))
-        (kitty-eglot-ensure-for "lake"))
-       ;; one is on its way: eglot takes every buffer of the project once it is up
-       ((and start (buffer-live-p (plist-get start :starter))
-             (< (- (float-time) (plist-get start :since)) kitty-lean--start-patience))
-        (unless (memq (current-buffer) (plist-get start :waiting))
+           (start (kitty-lean--starting key)))
+      (if start
           (puthash key (plist-put start :waiting (cons (current-buffer) (plist-get start :waiting)))
-                   kitty-lean--starts)))
-       (t
-        (kitty-lean--start-here key)
-        (kitty-eglot-ensure-for "lake"))))))
-
-(defun kitty-lean--hand-over (key)
-  "The start under KEY came to nothing: a waiting buffer starts one, or nobody."
-  (let* ((start (gethash key kitty-lean--starts))
-         (next (seq-find #'buffer-live-p (plist-get start :waiting))))
-    (remhash key kitty-lean--starts)
-    (when next
-      (with-current-buffer next
-        (kitty-lean--start-here key)
-        (puthash key (plist-put (gethash key kitty-lean--starts) :waiting
-                                (remq next (seq-filter #'buffer-live-p (plist-get start :waiting))))
-                 kitty-lean--starts)
-        ;; not eglot-ensure: that waits for a command in this buffer, which
-        ;; may not be the one on screen
+                   kitty-lean--starts)
+        (puthash key (list :server nil :waiting nil) kitty-lean--starts)
+        (unless kitty-lean--start-timer
+          (setq kitty-lean--start-timer (run-at-time 1 1 #'kitty-lean--start-tick)))
         (condition-case err
-            (apply #'eglot--connect (eglot--guess-contact))
-          (error (message "Lean: the server did not start: %s" (error-message-string err))
-                 (remhash key kitty-lean--starts)))))))
+            (let ((eglot-connect-timeout kitty-lean-connect-timeout))
+              (apply connect args))
+          (error
+           ;; no `lake', a broken contact, or it exited during the first seconds
+           (kitty-lean--start-failed key)
+           (signal (car err) (cdr err))))))))
 
-(defun kitty-lean--starter-gone ()
-  "The buffer that was to start its project's server is killed before it did."
-  (let* ((key (ignore-errors (kitty-lean--project-key)))
-         (start (and key (gethash key kitty-lean--starts))))
-    (when (and start (eq (plist-get start :starter) (current-buffer))
-               (not (plist-get start :server)))
-      (puthash key (plist-put start :waiting (remq (current-buffer) (plist-get start :waiting)))
-               kitty-lean--starts)
-      ;; after this buffer is gone
-      (run-at-time 0 nil #'kitty-lean--hand-over key))))
+(defun kitty-lean--start-failed (key)
+  "The launch for KEY came to nothing: the buffers that waited try again."
+  (when-let* ((start (gethash key kitty-lean--starts)))
+    (remhash key kitty-lean--starts)
+    (dolist (b (plist-get start :waiting))
+      (when (buffer-live-p b)
+        (with-current-buffer b
+          (unless (bound-and-true-p eglot--managed-mode)
+            (kitty-lean--ensure-server)))))))
 
 (declare-function eglot--project "eglot")
+(declare-function jsonrpc-running-p "jsonrpc")
 (defun kitty-lean--server-key (server)
   (when-let* ((root (ignore-errors (project-root (eglot--project server)))))
     (file-truename root)))
@@ -201,37 +206,62 @@ has launched it.  test/kitty_lean_start.tla is its model.")
 (defun kitty-lean--server-launched (server)
   (when-let* ((key (kitty-lean--server-key server))
               (start (gethash key kitty-lean--starts)))
-    (puthash key (plist-put start :server server) kitty-lean--starts)))
+    (unless (plist-get start :server)
+      (puthash key (plist-put start :server server) kitty-lean--starts))))
 
 (defun kitty-lean--server-up (server)
   (when-let* ((key (kitty-lean--server-key server)))
-    (remhash key kitty-lean--starts)))
+    (when (eq (plist-get (gethash key kitty-lean--starts) :server) server)
+      (remhash key kitty-lean--starts))))
 
 (defun kitty-lean--server-ended (server)
   "SERVER exited; if it never answered `initialize', its start failed."
-  (when-let* ((key (kitty-lean--server-key server))
-              (start (gethash key kitty-lean--starts)))
-    (when (eq (plist-get start :server) server)
+  (when-let* ((key (kitty-lean--server-key server)))
+    (when (eq (plist-get (gethash key kitty-lean--starts) :server) server)
       ;; not from inside the process sentinel this runs in
-      (run-at-time 0 nil #'kitty-lean--hand-over key))))
+      (run-at-time 0 nil #'kitty-lean--start-failed key))))
 
-(defun kitty-lean--connect-or-hand-over (connect &rest args)
-  "eglot's connect, from a Lean buffer that starts its project's server:
-when it fails at once (no `lake', a broken contact), the start is over."
-  (let ((key (and (derived-mode-p 'nael-mode) (ignore-errors (kitty-lean--project-key)))))
-    (condition-case err
-        (apply connect args)
-      (error
-       (when (and key (eq (plist-get (gethash key kitty-lean--starts) :starter) (current-buffer)))
-         (run-at-time 0 nil #'kitty-lean--hand-over key))
-       (signal (car err) (cdr err))))))
+;; While it starts: what lake and elan say (downloading a toolchain, cloning
+;; the dependencies), as VS Code shows it, instead of a file that looks dead.
+(declare-function jsonrpc-stderr-buffer "jsonrpc")
+(defun kitty-lean--start-status ()
+  "\" Lean starting: <last line lake printed>\" while this project's server starts."
+  (when-let* ((start (kitty-lean--starting (kitty-lean--project-key))))
+    (let* ((server (plist-get start :server))
+           (err (and server (ignore-errors (jsonrpc-stderr-buffer server))))
+           (line (and (buffer-live-p err)
+                      (with-current-buffer err
+                        (save-excursion
+                          (goto-char (point-max))
+                          (skip-chars-backward " \t\n\r")
+                          (string-trim (buffer-substring (line-beginning-position) (point))))))))
+      (format " Lean starting%s"
+              (if (and line (not (string-empty-p line)))
+                  (concat ": " (truncate-string-to-width (replace-regexp-in-string "\r" "" line) 50 nil nil "…"))
+                "…")))))
+
+(defconst kitty-lean--mode-line-element
+  '(:eval (string-replace "%" "%%" (concat (kitty-lean--start-status) (kitty-lean--mode-line))))
+  "In mode-line-misc-info (doom-modeline's misc-info): the start, the checking.
+An element, not a symbol: a list that starts with a symbol is a conditional.
+%, as in \"⧗ 40%\" or elan's download, is a mode-line construct: doubled.")
+
+(defun kitty-lean--start-tick ()
+  "Redraw the mode lines while a server starts, so its progress shows."
+  (if (zerop (hash-table-count kitty-lean--starts))
+      (progn (cancel-timer kitty-lean--start-timer) (setq kitty-lean--start-timer nil))
+    (force-mode-line-update t)))
+
+(defun kitty-lean--show-start ()
+  (unless (memq kitty-lean--mode-line-element mode-line-misc-info)
+    (setq-local mode-line-misc-info (cons kitty-lean--mode-line-element mode-line-misc-info))))
 
 (kitty-add-hook 'eglot-server-initialized-hook #'kitty-lean--server-launched)
 (kitty-add-hook 'eglot-connect-hook #'kitty-lean--server-up)
 (with-eval-after-load 'eglot
   ;; before: eglot--on-shutdown ends with an error when the server died
   (advice-add 'eglot--on-shutdown :before #'kitty-lean--server-ended)
-  (advice-add 'eglot--connect :around #'kitty-lean--connect-or-hand-over))
+  (advice-add 'eglot--connect :around #'kitty-lean--launch))
 
 ;; Lean files are long-lived proof states, not formatted by a tool.
 (with-eval-after-load 'apheleia
@@ -269,9 +299,6 @@ when it fails at once (no `lake', a broken contact), the start is over."
            (lines (max 1 (count-lines (point-min) (point-max)))))
       (format " ⧗ %d%%" (min 99 (/ (* 100 first) lines))))))
 
-(defvar-local kitty-lean--mode-line-construct
-    '(:eval (kitty-lean--mode-line)))
-(put 'kitty-lean--mode-line-construct 'risky-local-variable t)
 
 (defun kitty-lean--remove-progress ()
   (save-restriction
@@ -378,6 +405,7 @@ when it fails at once (no `lake', a broken contact), the start is over."
 (defvar kitty-lean--gen 0 "Generation of the latest infoview request.")
 (defvar kitty-lean--last-key nil "(BUFFER POINT TICK) of the latest infoview request.")
 (defvar kitty-lean--source nil "The buffer the infoview shows.")
+(defvar kitty-lean--rendered nil "The buffer whose answers the infoview shows.")
 (defvar kitty-lean--paused nil "Non-nil: the infoview keeps what it shows.")
 (defvar kitty-lean--pins nil "Markers the infoview also shows the goals of.")
 (defvar kitty-lean--shown-refs nil "(BUFFER SESSION REFS) the infoview holds: released on the next render.")
@@ -631,14 +659,14 @@ session they are gone with it, so the infoview is asked again instead."
   "Lean's diagnostics whose full range covers POS's line, as VS Code's Messages."
   (with-current-buffer buffer
     (when (bound-and-true-p flymake-mode)
-      (let ((line (1- (line-number-at-pos pos))))
+      (let ((line (1- (line-number-at-pos pos t))))
         (seq-filter
          (lambda (d)
            (let* ((lsp (kitty-lean--lsp-diag d))
                   (range (or (plist-get lsp :fullRange) (plist-get lsp :range))))
              (if range
                  (<= (plist-get (plist-get range :start) :line) line (plist-get (plist-get range :end) :line))
-               (save-excursion (goto-char (flymake-diagnostic-beg d)) (= line (1- (line-number-at-pos)))))))
+               (save-excursion (goto-char (flymake-diagnostic-beg d)) (= line (1- (line-number-at-pos nil t)))))))
          (flymake-diagnostics))))))
 
 (defun kitty-lean--severity (sev)
@@ -647,15 +675,28 @@ session they are gone with it, so the infoview is asked again instead."
 (defun kitty-lean--severity-face (sev)
   (pcase sev (1 'error) (2 'warning) (_ 'success)))
 
+(defun kitty-lean--lsp-point (buffer position)
+  "POSITION, an LSP line and character (UTF-16 for Lean), as a point in BUFFER."
+  (with-current-buffer buffer
+    (save-excursion (eglot--lsp-position-to-point position))))
+(declare-function eglot--lsp-position-to-point "eglot")
+
 (defun kitty-lean--insert-message (uri-buffer range severity message)
   "One message: where (RET jumps there), how bad, then the text."
   (let* ((start (plist-get range :start))
          (line (1+ (plist-get start :line)))
-         (col (plist-get start :character))
+         (col (if (buffer-live-p uri-buffer)
+                  (with-current-buffer uri-buffer
+                    (save-excursion
+                      (save-restriction
+                        (widen)
+                        (goto-char (kitty-lean--lsp-point uri-buffer start))
+                        (current-column))))
+                (plist-get start :character)))
          (beg (point)))
     (insert (propertize (format "%d:%d %s" line col (kitty-lean--severity severity))
                         'face (kitty-lean--severity-face severity)))
-    (put-text-property beg (point) 'kitty-lean-location (list uri-buffer line col))
+    (put-text-property beg (point) 'kitty-lean-location (list uri-buffer start))
     (insert "\n")
     (let ((b (point)))
       (if (stringp message) (insert message) (kitty-lean--insert-tagged message))
@@ -683,12 +724,14 @@ session they are gone with it, so the infoview is asked again instead."
   "g d" #'kitty-lean-infoview-goto
   "p" #'kitty-lean-infoview-toggle-pause
   "c" #'kitty-lean-infoview-clear-pins
+  "u" #'kitty-lean-infoview-unpin
   "q" #'quit-window)
 
 (define-derived-mode kitty-lean-infoview-mode special-mode "Infoview"
   "Lean's goals, expected type and messages at the cursor.
 \\<kitty-lean-infoview-mode-map>\\[kitty-lean-infoview-hover] on a term: its type and documentation; \
-\\[kitty-lean-infoview-goto]: its definition, or on a message: where it is."
+\\[kitty-lean-infoview-goto]: its definition, or on a message or pin: where it is; \
+\\[kitty-lean-infoview-unpin] on a pin: unpin it."
   (setq-local truncate-lines nil
               word-wrap t
               cursor-in-non-selected-windows nil))
@@ -765,11 +808,37 @@ session they are gone with it, so the infoview is asked again instead."
   (push (copy-marker (point)) kitty-lean--pins)
   (kitty-lean-infoview-refresh (current-buffer) t))
 
+(defun kitty-lean-infoview-unpin ()
+  "Unpin the pin whose heading point is on, in the infoview (VS Code's Unpin)."
+  (interactive)
+  (let ((m (get-text-property (point) 'kitty-lean-pin)))
+    (unless m (user-error "Lean: no pin here (on its \"Pinned at\" line)"))
+    (setq kitty-lean--pins (delq m kitty-lean--pins))
+    (set-marker m nil)
+    (when (buffer-live-p kitty-lean--source) (kitty-lean-infoview-refresh kitty-lean--source t))))
+
 (defun kitty-lean-infoview-clear-pins ()
   "Unpin every pinned position (lean.nvim's \\c)."
   (interactive)
   (setq kitty-lean--pins nil)
   (when (buffer-live-p kitty-lean--source) (kitty-lean-infoview-refresh kitty-lean--source t)))
+
+(defun kitty-lean--source-closed ()
+  "This Lean buffer is closed: the infoview no longer shows its goals."
+  (when (memq (current-buffer) (list kitty-lean--source kitty-lean--rendered))
+    (when (eq kitty-lean--rendered (current-buffer)) (kitty-lean--release-shown))
+    (setq kitty-lean--source nil kitty-lean--rendered nil kitty-lean--last-key nil)
+    (cl-incf kitty-lean--gen)           ; its answers on their way are not shown
+    (when-let* ((iv (get-buffer kitty-lean-infoview-buffer-name)))
+      (with-current-buffer iv
+        (let ((inhibit-read-only t))
+          (erase-buffer)
+          (insert (propertize "No Lean file." 'face 'shadow) "\n"))))))
+
+(defun kitty-lean--source-or-lose ()
+  (unless (and (buffer-live-p kitty-lean--source)
+               (with-current-buffer kitty-lean--source (eglot-managed-p)))
+    (user-error "Lean: the file these goals are from is closed")))
 
 (defun kitty-lean--info-at-point ()
   (or (get-text-property (point) 'kitty-lean-info)
@@ -778,6 +847,7 @@ session they are gone with it, so the infoview is asked again instead."
 (defun kitty-lean-infoview-hover ()
   "The type and documentation of the term at point in the infoview (VS Code's hover there)."
   (interactive)
+  (kitty-lean--source-or-lose)
   (let* ((info (kitty-lean--info-at-point))
          (r (kitty-lean--rpc-call-sync kitty-lean--source (with-current-buffer kitty-lean--source (point))
                                        "Lean.Widget.InteractiveDiagnostics.infoToInteractive" info)))
@@ -795,26 +865,34 @@ session they are gone with it, so the infoview is asked again instead."
          (file (eglot-uri-to-path uri)))
     (xref-push-marker-stack)
     (pop-to-buffer (find-file-noselect file) '((display-buffer-reuse-window display-buffer-use-some-window)))
-    (goto-char (point-min))
-    (forward-line (plist-get (plist-get range :start) :line))
-    (forward-char (plist-get (plist-get range :start) :character))))
+    (kitty-lean--goto-point (kitty-lean--lsp-point (current-buffer) (plist-get range :start)))))
+
+(defun kitty-lean--goto-point (pos)
+  "Go to POS, widening if a narrowing hides it."
+  (unless (<= (point-min) pos (point-max)) (widen))
+  (goto-char pos))
 (declare-function xref-push-marker-stack "xref")
 
 (defun kitty-lean-infoview-goto ()
-  "On a term: go to its definition (VS Code's ctrl-click).  On a message: to where it is."
+  "On a term: go to its definition (VS Code's ctrl-click).
+On a message: to where it is.  On a pin: to the pinned place."
   (interactive)
-  (if-let* ((loc (get-text-property (point) 'kitty-lean-location)))
-      (pcase-let ((`(,buffer ,line ,col) loc))
+  (if-let* ((pin (get-text-property (point) 'kitty-lean-pin)))
+      (progn (unless (marker-buffer pin) (user-error "Lean: that file is closed"))
+             (pop-to-buffer (marker-buffer pin) '((display-buffer-reuse-window display-buffer-use-some-window)))
+             (kitty-lean--goto-point (marker-position pin)))
+   (if-let* ((loc (get-text-property (point) 'kitty-lean-location)))
+      (pcase-let ((`(,buffer ,position) loc))
+        (unless (buffer-live-p buffer) (user-error "Lean: that file is closed"))
         (pop-to-buffer buffer '((display-buffer-reuse-window display-buffer-use-some-window)))
-        (goto-char (point-min)) (forward-line (1- line)) (forward-char col))
+        (kitty-lean--goto-point (kitty-lean--lsp-point buffer position)))
+    (kitty-lean--source-or-lose)
     (let* ((info (kitty-lean--info-at-point))
            (locs (kitty-lean--rpc-call-sync kitty-lean--source (with-current-buffer kitty-lean--source (point))
                                             "Lean.Widget.getGoToLocation" (list :kind "definition" :info info))))
       (if (seq-empty-p locs)
           (message "Lean: no definition for this term")
-        (kitty-lean--goto-lsp-location (seq-first locs))))))
-
-(defvar kitty-lean--rendered nil "The buffer whose answers the infoview shows.")
+        (kitty-lean--goto-lsp-location (seq-first locs)))))))
 
 (defun kitty-lean--placeholder (buffer)
   "While Lean builds the imports or checks up to the cursor, no answer comes:
@@ -839,7 +917,7 @@ PARTS: plist :goals (interactive goals, or plain strings) :term :messages :pins.
            (name (buffer-name buffer))
            (line-col (with-current-buffer buffer
                        (save-excursion (goto-char pos)
-                                       (format "%d:%d" (line-number-at-pos) (current-column)))))
+                                       (format "%d:%d" (line-number-at-pos nil t) (current-column)))))
            (busy (kitty-lean-busy-p buffer))
            (goals (plist-get parts :goals))
            (term (plist-get parts :term))
@@ -854,10 +932,13 @@ PARTS: plist :goals (interactive goals, or plain strings) :term :messages :pins.
                   (if kitty-lean--paused (propertize "  ⏸ paused (p)" 'face 'warning) "")
                   "\n\n")
           (dolist (pin (plist-get parts :pins))
-            (insert (propertize (format "Pinned at %s" (car pin)) 'face 'kitty-lean-infoview-heading) "\n")
+            (insert (propertize (format "Pinned at %s" (cadr pin)) 'face 'kitty-lean-infoview-heading
+                                'kitty-lean-pin (car pin)
+                                'help-echo "RET: go there, u: unpin")
+                    "\n")
             (let ((b (point)))
-              (if (seq-empty-p (cdr pin)) (insert "No goals\n")
-                (seq-do (lambda (g) (kitty-lean--insert-goal g) (insert "\n")) (cdr pin)))
+              (if (seq-empty-p (cddr pin)) (insert "No goals\n")
+                (seq-do (lambda (g) (kitty-lean--insert-goal g) (insert "\n")) (cddr pin)))
               (kitty-lean--fontify-region b (point)))
             (insert "\n"))
           (cond
@@ -946,7 +1027,7 @@ The goals are a list, or :none outside a proof."
   (let ((here (kitty-lean--diagnostics-here buffer pos)))
     (if (null here)
         (funcall callback (cons t nil))
-      (let ((line (with-current-buffer buffer (1- (line-number-at-pos pos)))))
+      (let ((line (with-current-buffer buffer (1- (line-number-at-pos pos t)))))
         (kitty-lean--rpc-call
          buffer pos "Lean.Widget.getInteractiveDiagnostics"
          (list :lineRange (list :start line :end (1+ line)))
@@ -989,7 +1070,7 @@ Skipped when the infoview is closed or paused, or (unless FORCE) when nothing mo
                 kitty-lean--source buffer)
           (when (kitty-lean-busy-p buffer) (kitty-lean--placeholder buffer))
           (let* ((gen (cl-incf kitty-lean--gen))
-                 (pins (seq-filter (lambda (m) (eq (marker-buffer m) buffer)) kitty-lean--pins))
+                 (pins (seq-filter (lambda (m) (kitty-lean--pin-live-p m)) kitty-lean--pins))
                  (want (+ 3 (length pins)))
                  (parts nil)
                  (failed nil)
@@ -1006,11 +1087,26 @@ Skipped when the infoview is closed or paused, or (unless FORCE) when nothing mo
             (kitty-lean--ask-term buffer pos (lambda (a) (funcall done :term a)))
             (kitty-lean--ask-messages buffer pos (lambda (a) (funcall done :messages a)))
             (dolist (m pins)
-              (let ((where (with-current-buffer buffer
-                             (save-excursion (goto-char m) (format "%d:%d" (line-number-at-pos) (current-column))))))
-                (kitty-lean--ask-goals buffer (marker-position m)
-                                       (lambda (a) (funcall done :pins
-                                                            (cons (car a) (cons where (if (eq (cdr a) :none) nil (cdr a)))))))))))))))
+              (let* ((there (marker-buffer m))
+                     (where (with-current-buffer there
+                              (save-excursion
+                                (goto-char m)
+                                (format "%s%d:%d" (if (eq there buffer) "" (concat (buffer-name there) ":"))
+                                        (line-number-at-pos nil t) (current-column)))))
+                     (answer (lambda (a) (funcall done :pins
+                                                  (cons (car a) (cl-list* m where (if (eq (cdr a) :none) nil (cdr a))))))))
+                (if (eq there buffer)
+                    (kitty-lean--ask-goals buffer (marker-position m) answer)
+                  ;; another file's: plain goals, its references would
+                  ;; belong to that file's session
+                  (kitty-lean--request :$/lean/plainGoal there (marker-position m)
+                                       (lambda (p) (funcall answer
+                                                            (cons (car p) (if (cdr p) (append (plist-get (cdr p) :goals) nil) :none))))))))))))))
+
+(defun kitty-lean--pin-live-p (m)
+  "Whether the pin M is in a Lean file that is open and has its server."
+  (when-let* ((b (marker-buffer m)))
+    (with-current-buffer b (and (derived-mode-p 'nael-mode) (fboundp 'eglot-managed-p) (eglot-managed-p)))))
 
 (defun kitty-lean--eldoc-refresh (_callback &rest _)
   "An eldoc function that shows nothing itself: it refreshes the infoview.
@@ -1049,14 +1145,7 @@ queue hundreds of goal requests behind the check and slow Lean down.")
     (setq kitty-lean--rpc-session nil)
     (if (not (eglot-managed-p))
         (remove-hook 'eldoc-documentation-functions #'kitty-lean--eldoc-refresh t)
-      ;; managed some other way (a definition's file, under the server that
-      ;; showed it): no start of its own to wait for
-      (let ((key (kitty-lean--project-key)))
-        (when (eq (plist-get (gethash key kitty-lean--starts) :starter) (current-buffer))
-          (remhash key kitty-lean--starts)))
       (add-hook 'eldoc-documentation-functions #'kitty-lean--eldoc-refresh nil t)
-      (unless (memq 'kitty-lean--mode-line-construct mode-line-misc-info)
-        (setq-local mode-line-misc-info (cons 'kitty-lean--mode-line-construct mode-line-misc-info)))
       (when (and kitty-lean-infoview-auto-open (not (kitty-lean--infoview-window))
                  (get-buffer-window (current-buffer)))
         (kitty-lean-infoview-open)))))
@@ -1089,28 +1178,79 @@ Lean file, is an error out of `kill-buffer'.  The server is gone either way."
     (kbd "gd") #'kitty-lean-infoview-goto
     (kbd "p") #'kitty-lean-infoview-toggle-pause
     (kbd "c") #'kitty-lean-infoview-clear-pins
+    (kbd "u") #'kitty-lean-infoview-unpin
     (kbd "q") #'quit-window))
 
 ;;;; Commands
+
+(defun kitty-lean--need-server ()
+  "A `user-error' that says why, unless this buffer has a Lean server."
+  (unless (and (fboundp 'eglot-managed-p) (eglot-managed-p))
+    (user-error (cond ((not (executable-find "lake"))
+                       "Lean: `lake' is not on PATH; install elan (https://github.com/leanprover/elan)")
+                      ((kitty-lean--starting (kitty-lean--project-key))
+                       "Lean: the server is still starting")
+                      (t "Lean: no server for this buffer (\\R starts one)")))))
+
+;; Opening a file does not build its imports, as in VS Code (its
+;; lean4.automaticallyBuildDependencies is off): one file of a Mathlib
+;; project without the cache would build Mathlib from source.  Lean says
+;; the imports are out of date, and \r rebuilds them.
+(defcustom kitty-lean-build-dependencies nil
+  "Non-nil: opening a Lean file builds its out-of-date imports first."
+  :type 'boolean
+  :group 'kittymax)
+
+(defvar kitty-lean--build-mode nil "dependencyBuildMode for the next didOpen, if not the default.")
+
+(defun kitty-lean--did-open-params (args)
+  "Add Lean's dependencyBuildMode to a didOpen eglot sends from a Lean buffer."
+  (pcase args
+    (`(,conn :textDocument/didOpen ,params . ,rest)
+     (if (and (derived-mode-p 'nael-mode) (not (plist-member params :dependencyBuildMode)))
+         `(,conn :textDocument/didOpen
+                 ,(append params (list :dependencyBuildMode
+                                       (or kitty-lean--build-mode
+                                           (if kitty-lean-build-dependencies "always" "never"))))
+                 ,@rest)
+       args))
+    (_ args)))
+(with-eval-after-load 'jsonrpc
+  (advice-add 'jsonrpc-notify :filter-args #'kitty-lean--did-open-params))
 
 (defun kitty-lean-restart-file ()
   "Check this file again from the start, with freshly built imports (\\r).
 VS Code's Restart File: close and reopen the document on the server."
   (interactive)
-  (unless (eglot-managed-p) (user-error "Lean: no server for this buffer"))
+  (kitty-lean--need-server)
   (eglot--signal-textDocument/didClose)
-  (eglot--signal-textDocument/didOpen)
+  (let ((kitty-lean--build-mode "once"))
+    (eglot--signal-textDocument/didOpen))
   (message "Lean: checking %s again" (buffer-name)))
 
+(declare-function eglot--guess-contact "eglot")
+(declare-function eglot--connect "eglot")
+(declare-function jsonrpc-shutdown "jsonrpc")
 (defun kitty-lean-restart-server ()
-  "Restart the Lean server (VS Code's Restart Server)."
+  "Restart the Lean server (VS Code's Restart Server), or a start that hangs."
   (interactive)
-  (call-interactively #'eglot-reconnect))
+  (cond
+   ((and (fboundp 'eglot-current-server) (eglot-current-server))
+    (call-interactively #'eglot-reconnect))
+   ((not (executable-find "lake")) (kitty-lean--need-server))
+   (t
+    (let* ((key (kitty-lean--project-key))
+           (start (gethash key kitty-lean--starts))
+           (server (plist-get start :server)))
+      (kitty-lean--start-failed key)
+      (when (and server (jsonrpc-running-p server)) (jsonrpc-shutdown server))
+      (apply #'eglot--connect (eglot--guess-contact))))))
 
 (defun kitty-lean--goals-at (pos)
   "Lean's goals at POS, synchronously (a list of strings)."
   (save-excursion
     (goto-char pos)
+    (kitty-lean--need-server)
     (kitty-lean--flush)
     (let ((r (jsonrpc-request (eglot--current-server-or-lose) :$/lean/plainGoal
                               (eglot--TextDocumentPositionParams))))
@@ -1138,6 +1278,7 @@ VS Code's Restart File: close and reopen the document on the server."
   (let ((params (list :textDocument (eglot--TextDocumentIdentifier)
                       :range (eglot-region-range (line-beginning-position) (line-end-position))
                       :context (list :diagnostics []))))
+    (kitty-lean--need-server)
     (kitty-lean--flush)
     (append (jsonrpc-request (eglot--current-server-or-lose) :textDocument/codeAction params) nil)))
 (declare-function eglot-region-range "eglot")
@@ -1197,30 +1338,75 @@ VS Code's Restart File: close and reopen the document on the server."
   (let ((local-abbrev-table nael-abbrev-table))
     (call-interactively #'nael-abbrev-help)))
 
-(defvar kitty-lean--abbrev-names nil "Every \\-abbreviation, for eager replacement.")
+(defvar kitty-lean--abbrev-names nil "Every \\-abbreviation, shortest first, for eager replacement.")
+
+;; VS Code's table has a few that nael's lacks (\\\\ and \\+SPC are handled
+;; above, or can't be: an abbrev has no space).
+(declare-function nael-abbrev-help "nael-abbrev")
+(with-eval-after-load 'nael-abbrev
+  (require 'skeleton)
+  (define-skeleton kitty-lean--skeleton-h<> "" nil "❰" _ "❱")
+  (define-skeleton kitty-lean--skeleton-^ "" nil "⁽" _ "⁾")
+  (define-skeleton kitty-lean--skeleton-_ "" nil "₍" _ "₎")
+  (dolist (a '(("\\h<" "❰") ("\\h>" "❱") ("\\:t" "⦂") ("\\typecolon" "⦂")
+               ("\\^C" "ꟲ") ("\\^F" "ꟳ") ("\\^Q" "ꟴ") ("\\^S" "\ua7f1")
+               ("\\_c" "𞁞") ("\\_w" "\u209d") ("\\_y" "\u209e") ("\\_z" "\u209f")))
+    (unless (abbrev--symbol (car a) nael-abbrev-singleton-table)
+      (define-abbrev nael-abbrev-singleton-table (car a) (cadr a) nil :system t)))
+  (dolist (a '(("\\h<>" kitty-lean--skeleton-h<>) ("\\^()" kitty-lean--skeleton-^)
+               ("\\_()" kitty-lean--skeleton-_)))
+    (unless (abbrev--symbol (car a) nael-abbrev-skeleton-table)
+      (define-abbrev nael-abbrev-skeleton-table (car a) "" (cadr a) :system t))))
 
 (defun kitty-lean--abbrev-names ()
   (or kitty-lean--abbrev-names
       (setq kitty-lean--abbrev-names (mapcar #'car (kitty-lean--abbrevs)))))
 
+(defun kitty-lean--finish-abbrev (start end)
+  "The abbreviation from START (its \\) to END is finished: its symbol, or the
+symbol of the shortest abbreviation it starts (VS Code: \\alp SPC → α)."
+  (let* ((typed (buffer-substring-no-properties start end))
+         (name (if (member typed (kitty-lean--abbrev-names)) typed
+                 (seq-find (lambda (n) (string-prefix-p typed n)) (kitty-lean--abbrev-names)))))
+    (when name
+      (let ((replace (lambda ()
+                       (delete-region start end)
+                       (goto-char start)
+                       (insert name)
+                       (let ((local-abbrev-table nael-abbrev-table)) (expand-abbrev)))))
+        ;; at the end (TAB) a skeleton leaves point between its brackets
+        (if (= (point) end) (funcall replace) (save-excursion (funcall replace))))
+      t)))
+
+(defun kitty-lean--abbrev-start (end)
+  "Where the \\-abbreviation ending at END starts, or nil."
+  (save-excursion
+    (goto-char end)
+    (skip-chars-backward "^\\\\ \t\n" (max (line-beginning-position) (- end 40)))
+    (and (eq (char-before) ?\\) (< (point) end) (1- (point)))))
+
 (defun kitty-lean--eager-expand ()
   "VS Code's eager replacement, after each character typed.
 An abbreviation is replaced as soon as it is complete and no longer one
 starts with it (\\forall → ∀ at the l), or once the next character makes
-it the start of none (\\<x → ⟨x⟩).  nael itself replaces the rest when a
-space or punctuation follows (\\to SPC → → )."
-  (when-let* ((start (save-excursion
-                       (skip-chars-backward "^\\\\ \t\n" (max (line-beginning-position) (- (point) 40)))
-                       (and (eq (char-before) ?\\) (1- (point)))))
-              ((> (- (point) start) 1)))
-    (let* ((typed (buffer-substring-no-properties start (point)))
-           (names (kitty-lean--abbrev-names))
-           ;; \\alpha is not \\Alpha, whatever completion-ignore-case says
-           (done (let ((completion-ignore-case nil)) (try-completion typed names))))
-      (cond
-       ((eq done t) (expand-abbrev))
-       ((and (null done) (> (length typed) 2) (member (substring typed 0 -1) names))
-        (save-excursion (backward-char) (expand-abbrev)))))))
+it the start of none (\\<x → ⟨x⟩, \\alp) → α)): an unfinished one becomes
+the symbol of the shortest abbreviation it starts, as on SPC (\\alp SPC → α).
+\\\\ is a backslash."
+  (let* ((sep (memq (char-before) '(?\s ?\t ?\n)))
+         (end (if sep (1- (point)) (point))))
+    (if (and (not sep) (eq (char-before) ?\\) (eq (char-before (1- (point))) ?\\)
+             (not (eq (char-before (- (point) 2)) ?\\)))
+        (delete-char -1)
+      (when-let* ((start (kitty-lean--abbrev-start end))
+                  ((> (- end start) 1)))
+        (let* ((typed (buffer-substring-no-properties start end))
+               ;; \\alpha is not \\Alpha, whatever completion-ignore-case says
+               (done (let ((completion-ignore-case nil)) (try-completion typed (kitty-lean--abbrev-names)))))
+          (cond
+           (sep (kitty-lean--finish-abbrev start end))
+           ((eq done t) (expand-abbrev))
+           ((and (null done) (> (length typed) 2))
+            (kitty-lean--finish-abbrev start (1- end)))))))))
 
 (defun kitty--lean-eager ()
   (add-hook 'post-self-insert-hook #'kitty-lean--eager-expand 90 t))
@@ -1230,9 +1416,9 @@ space or punctuation follows (\\to SPC → → )."
   "TAB after a \\-abbreviation turns it into its symbol and nothing more,
 as in VS Code; elsewhere, TAB as always."
   (interactive)
-  (if (and (bound-and-true-p abbrev-mode) (boundp 'nael-abbrev-regexp)
-           (looking-back nael-abbrev-regexp (line-beginning-position)))
-      (expand-abbrev)
+  (unless (and (bound-and-true-p abbrev-mode)
+               (when-let* ((start (kitty-lean--abbrev-start (point))))
+                 (kitty-lean--finish-abbrev start (point))))
     (call-interactively #'indent-for-tab-command)))
 
 (defun kitty-lean-expand-before-point ()
@@ -1351,7 +1537,26 @@ With C-u, asks for a TARGET."
   (interactive (list (and current-prefix-arg (read-string "lake build target: "))))
   (let ((default-directory (kitty-lean--project-or-lose)))
     (save-some-buffers t (lambda () (derived-mode-p 'nael-mode)))
-    (compile (string-join (delq nil (list "lake build" (and target (shell-quote-argument target)))) " "))))
+    (compile (concat
+              ;; as VS Code's Build Project: Mathlib's prebuilt files first
+              (if (kitty-lean--uses-mathlib-p default-directory) "lake exe cache get && " "")
+              (string-join (delq nil (list "lake build" (and target (shell-quote-argument target)))) " ")))))
+
+(defun kitty-lean--uses-mathlib-p (root)
+  "Whether the Lake project at ROOT is Mathlib or depends on it."
+  (or (file-directory-p (expand-file-name ".lake/packages/mathlib" root))
+      (let ((manifest (expand-file-name "lake-manifest.json" root)))
+        (and (file-readable-p manifest)
+             (with-temp-buffer
+               (insert-file-contents manifest)
+               (re-search-forward "\"name\": *\"mathlib\"" nil t))))
+      (seq-some (lambda (f)
+                  (let ((file (expand-file-name f root)))
+                    (and (file-readable-p file)
+                         (with-temp-buffer
+                           (insert-file-contents file)
+                           (re-search-forward "^ *\\(package +«?mathlib»?\\|name *= *\"mathlib\"\\)" nil t)))))
+                '("lakefile.lean" "lakefile.toml"))))
 
 (defun kitty-lean-run-file (&optional args)
   "Run this file's `main' (`lake env lean --run'), C-u asks for ARGS (SPC m r)."

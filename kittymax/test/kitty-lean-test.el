@@ -183,6 +183,16 @@ a failed answer leaves the infoview as it was."
                       regexp kitty-lean--gen kitty-lean--paused (kitty-lean-test--infoview-text))
              nil)))
 
+(defun kitty-lean-test--misc-info (buffer)
+  "What BUFFER's mode-line-misc-info shows of Lean (doom-modeline's misc-info).
+format-mode-line says nothing in batch Emacs: so, its rules for a list
+(one that starts with a symbol is a conditional, not a list of elements)."
+  (with-current-buffer buffer
+    (should (consp (car mode-line-misc-info)))
+    (let ((el (seq-find (lambda (e) (eq e kitty-lean--mode-line-element)) mode-line-misc-info)))
+      (should el)
+      (or (eval (cadr el) t) ""))))
+
 (defun kitty-lean-test--visit (file)
   (let ((buf (find-file-noselect (expand-file-name file (kitty-lean-test--project)))))
     (switch-to-buffer buf)
@@ -269,6 +279,8 @@ a failed answer leaves the infoview as it was."
                              (vector (list :range (list :start (list :line 2 :character 0) :end (list :line 5 :character 0)) :kind 1)))
     (should (kitty-lean-busy-p buf))
     (should (string-match-p "⧗" (kitty-lean--mode-line)))
+    ;; what doom-modeline's misc-info segment shows
+    (should (string-match-p "⧗ [0-9]+%%" (kitty-lean-test--misc-info buf)))
     (should (kitty-lean-test--wait 2 (lambda () (= 1 (length kitty-lean--progress-overlays)))))
     (let ((gen kitty-lean--gen))
       (kitty-lean--on-progress (plist-get (eglot--TextDocumentIdentifier) :uri) [])
@@ -290,6 +302,9 @@ the infoview from the one you are in, as in VS Code."
     (goto-char (point-min)) (forward-line 3) (back-to-indentation)
     (kitty-lean-infoview-refresh buf t)
     (should (kitty-lean-test--infoview-shows 30 "⊢ a \\+ b = b \\+ a"))
+    ;; Bad.lean's own check is over (its diagnostics refresh, rightly)
+    (should (kitty-lean-test--wait 60 (lambda () (not (kitty-lean-busy-p buf)))))
+    (kitty-lean-test--wait 1 #'ignore)
     (let ((gen kitty-lean--gen))
       ;; both opened before the server was up: one server for the two
       (should (with-current-buffer other (eglot-managed-p)))
@@ -758,3 +773,221 @@ before it did: the other still gets the server.  test/kitty_lean_start.tla."
 
 (provide 'kitty-lean-test)
 ;;; kitty-lean-test.el ends here
+
+;;;; The second review (Fable 5.2)
+
+(defvar eglot-sync-connect)
+(defvar eglot-connect-timeout)
+
+(ert-deftest kitty-lean-a-file-opened-out-of-sight-strands-nobody ()
+  "`kittymax A.lean B.lean': A is opened without being shown, B is where you
+work.  B gets the server, A with it, and it is the project's only one.
+test/kitty_lean_start.tla, with the selected buffer."
+  (kitty-lean-test--skip-unless-lean)
+  (kitty-lean-test--boot)
+  (kitty-lean-test--fresh)
+  (kitty-lean-test--wait 3 #'ignore)
+  (clrhash kitty-lean--starts)
+  (let* ((a (find-file-noselect (expand-file-name "Demo/Good.lean" (kitty-lean-test--project))))
+         (b (kitty-lean-test--visit "Demo/Bad.lean")))
+    (should (kitty-lean-test--wait 30 (lambda () (with-current-buffer b (eglot-managed-p)))))
+    (should (with-current-buffer a (eglot-managed-p)))
+    ;; A's own eglot-ensure, after a command there, finds the server
+    (with-current-buffer a (run-hooks 'post-command-hook))
+    (should (= 1 (length (gethash (with-current-buffer b (eglot--project (eglot-current-server)))
+                                  eglot--servers-by-project))))))
+
+(ert-deftest kitty-lean-two-files-at-once-get-one-server ()
+  "Both files have their command before the server answers: one launch."
+  (kitty-lean-test--skip-unless-lean)
+  (kitty-lean-test--boot)
+  (kitty-lean-test--fresh)
+  (kitty-lean-test--wait 3 #'ignore)
+  (clrhash kitty-lean--starts)
+  (let ((launches 0)
+        (eglot-sync-connect nil))        ; the connect returns before Lean answers
+    (advice-add 'jsonrpc-async-request :before
+                (lambda (_c m &rest _) (when (eq m :initialize) (cl-incf launches)))
+                '((name . kitty-lean-test-launches)))
+    (unwind-protect
+        (let ((a (kitty-lean-test--visit "Demo/Good.lean"))
+              (b (kitty-lean-test--visit "Demo/Bad.lean")))
+          (should (kitty-lean-test--wait 30 (lambda () (and (with-current-buffer a (eglot-managed-p))
+                                                            (with-current-buffer b (eglot-managed-p))))))
+          (should (= launches 1)))
+      (advice-remove 'jsonrpc-async-request 'kitty-lean-test-launches))))
+
+(ert-deftest kitty-lean-a-slow-start-is-waited-for-and-shown ()
+  "elan fetching a toolchain takes minutes; eglot gives up after
+eglot-connect-timeout (30 s; 2 s here).  Lean is waited for, and the mode
+line says what lake prints meanwhile."
+  (kitty-lean-test--skip-unless-lean)
+  (kitty-lean-test--boot)
+  (kitty-lean-test--fresh)
+  (kitty-lean-test--wait 3 #'ignore)
+  (clrhash kitty-lean--starts)
+  (let ((eglot-connect-timeout 2)
+        (eglot-sync-connect nil)
+        (seen nil)
+        (nael-eglot-contact '("sh" "-c" "echo 'info: downloading toolchain' >&2; sleep 5; exec lake serve")))
+    (let ((b (kitty-lean-test--visit "Demo/Bad.lean")))
+      (should (kitty-lean-test--wait 30 (lambda ()
+                                          (when (string-match-p "Lean starting: info: downloading toolchain"
+                                                                (kitty-lean-test--misc-info b))
+                                            (setq seen t))
+                                          (with-current-buffer b (eglot-managed-p)))))
+      (should seen)
+      (should-not (string-match-p "Lean starting" (kitty-lean-test--misc-info b))))))
+
+(ert-deftest kitty-lean-no-lake-says-so ()
+  "Without lake (no elan yet): one message, and the commands say why they can't."
+  (kitty-lean-test--skip-unless-lean)
+  (kitty-lean-test--boot)
+  (kitty-lean-test--fresh)
+  (kitty-lean-test--project)
+  (let ((exec-path '("/nonexistent"))
+        (kitty-lean--told-no-lake nil)
+        (shown nil))
+    (cl-letf* ((orig (symbol-function 'message))
+               ((symbol-function 'message)
+                (lambda (fmt &rest args) (when fmt (push (apply #'format fmt args) shown)) (apply orig fmt args))))
+      (let ((b (kitty-lean-test--visit "Demo/Good.lean")))
+        (should (seq-find (lambda (m) (string-match-p "lake.? is not on PATH" m)) shown))
+        (should-not (buffer-local-value 'eglot--managed-mode b))
+        (dolist (cmd '(kitty-lean-restart-file kitty-lean-restart-server kitty-lean-sorry-fill kitty-lean-accept-suggestion))
+          (should (string-match-p "lake.? is not on PATH"
+                                  (condition-case e (progn (funcall cmd) "no error")
+                                    (user-error (cadr e)) (error (format "%S" e))))))))))
+
+(ert-deftest kitty-lean-narrowed-buffers-show-the-right-line ()
+  "Narrowed: the header and the messages are those of the line in the file."
+  (kitty-lean-test--skip-unless-lean)
+  (kitty-lean-test--boot)
+  (let ((buf (kitty-lean-test--bad-with-goal)))
+    (unwind-protect
+        (progn
+          (goto-char (point-min)) (forward-line 2)
+          (narrow-to-region (point) (point-max))
+          (forward-line 1) (back-to-indentation)
+          (with-current-buffer kitty-lean-infoview-buffer-name (let ((inhibit-read-only t)) (erase-buffer)))
+          (kitty-lean-infoview-refresh buf t)
+          (should (kitty-lean-test--infoview-shows 30 "Bad.lean:4:2"))
+          (should (kitty-lean-test--infoview-shows 30 "3:41 error\nunsolved goals")))
+      (with-current-buffer buf (widen)))))
+
+(ert-deftest kitty-lean-wide-characters-are-where-lean-says ()
+  "Lean counts columns in UTF-16, where 𝕜 is two: the infoview's columns
+and jumps are the buffer's."
+  (kitty-lean-test--skip-unless-lean)
+  (kitty-lean-test--boot)
+  (kitty-lean-test--fresh)
+  (kitty-lean-test--write (kitty-lean-test--project) "Wide.lean"
+                          "def 𝔸𝔹 : Nat := 1\ntheorem 𝕜𝕜 (a b : Nat) : a + b = b + a := by skip\n")
+  (let ((buf (kitty-lean-test--visit "Wide.lean")))
+    (should (kitty-lean-test--wait 60 (lambda () (eglot-managed-p))))
+    (should (kitty-lean-test--wait 120 (lambda () (kitty-lean-test--errors buf))))
+    (should (kitty-lean-test--wait 60 (lambda () (not (kitty-lean-busy-p buf)))))
+    (unless (kitty-lean--infoview-window) (kitty-lean-infoview-open))
+    (let ((err (flymake-diagnostic-beg (car (kitty-lean-test--errors buf)))))
+      (goto-char err)
+      (kitty-lean-infoview-refresh buf t)
+      (should (kitty-lean-test--infoview-shows 30 (format "2:%d error" (save-excursion (goto-char err) (current-column)))))
+      (goto-char (point-min))
+      (with-current-buffer kitty-lean-infoview-buffer-name
+        (goto-char (point-min)) (search-forward " error") (backward-char 2)
+        (kitty-lean-infoview-goto))
+      (should (eq (window-buffer (selected-window)) buf))
+      (should (= (window-point) err)))
+    (set-buffer-modified-p nil)))
+
+(ert-deftest kitty-lean-closing-the-file-clears-the-infoview ()
+  "The infoview's file is closed: it says so, and K and RET say why they can't."
+  (kitty-lean-test--skip-unless-lean)
+  (kitty-lean-test--boot)
+  (let ((buf (kitty-lean-test--bad-with-goal)))
+    (with-current-buffer buf (set-buffer-modified-p nil))
+    (kill-buffer buf)
+    (should (string-match-p "\\`No Lean file" (kitty-lean-test--infoview-text)))
+    (kitty-lean-test--wait 2 #'ignore)
+    (should (string-match-p "\\`No Lean file" (kitty-lean-test--infoview-text)))
+    (with-current-buffer kitty-lean-infoview-buffer-name
+      (goto-char (point-min))
+      (should-error (kitty-lean-infoview-hover) :type 'user-error)
+      (should-error (kitty-lean-infoview-goto) :type 'user-error))))
+
+(ert-deftest kitty-lean-opening-a-file-builds-nothing ()
+  "As VS Code: opening a file does not build its imports (one file of a
+Mathlib project without the cache would build Mathlib); Lean says so,
+and \\r builds them."
+  (kitty-lean-test--skip-unless-lean)
+  (kitty-lean-test--boot)
+  (kitty-lean-test--fresh)
+  (let* ((root (kitty-lean-test--project))
+         (olean (expand-file-name ".lake/build/lib/lean/Demo/Dep.olean" root)))
+    (kitty-lean-test--write root "Demo/Dep.lean" "def dep : Nat := 7\n")
+    (kitty-lean-test--write root "UseDep.lean" "import Demo.Dep\n#eval dep\n")
+    (when (file-exists-p olean) (delete-file olean))
+    (let ((buf (kitty-lean-test--visit "UseDep.lean")))
+      (should (kitty-lean-test--wait 60 (lambda () (eglot-managed-p))))
+      (should (kitty-lean-test--wait 60 (lambda () (kitty-lean-test--errors buf))))
+      (should (string-match-p "Restart File\\|rebuilt\\|not built\\|out of date"
+                              (flymake-diagnostic-text (car (kitty-lean-test--errors buf)))))
+      (should-not (file-exists-p olean))
+      (kitty-lean-restart-file)
+      (should (kitty-lean-test--wait 120 (lambda () (file-exists-p olean))))
+      (should (kitty-lean-test--wait 60 (lambda () (and (not (kitty-lean-test--errors buf))
+                                                        (seq-find (lambda (d) (string-match-p "7" (flymake-diagnostic-text d)))
+                                                                  (flymake-diagnostics)))))))))
+
+(ert-deftest kitty-lean-build-gets-the-mathlib-cache-first ()
+  (let ((dir (make-temp-file "kitty-mathlib" t)))
+    (should-not (kitty-lean--uses-mathlib-p dir))
+    (kitty-lean-test--write dir "lakefile.toml" "name = \"m\"\n\n[[require]]\nname = \"mathlib\"\nscope = \"leanprover-community\"\n")
+    (should (kitty-lean--uses-mathlib-p dir))
+    (let (command)
+      (cl-letf (((symbol-function 'compile) (lambda (c &rest _) (setq command c)))
+                ((symbol-function 'kitty-lean--project-or-lose) (lambda () dir)))
+        (kitty-lean-build))
+      (should (equal command "lake exe cache get && lake build")))))
+
+(ert-deftest kitty-lean-unfinished-abbreviations ()
+  "As VS Code: an abbreviation ended before it is complete becomes the
+symbol of the shortest one it starts; \\\\ is \; VS Code's \\h<>."
+  (kitty-lean-test--skip-unless-lean)
+  (kitty-lean-test--boot)
+  (let ((buf (kitty-lean-test--visit "Demo/Bad.lean")))
+    (goto-char (point-max))
+    (dolist (c '(("o \\ a l p SPC x" "α x")
+                 ("o ( \\ a l p )" "(α)")
+                 ("o \\ a l p TAB" "α")
+                 ("o a \\ \\ n" "a\\n")
+                 ("o \\ : t" "⦂")))
+      (execute-kbd-macro (kbd (concat (car c) " <escape>")))
+      (should (equal (buffer-substring-no-properties (line-beginning-position) (line-end-position)) (cadr c))))
+    (execute-kbd-macro (kbd "o \\ h < > x <escape>"))
+    (should (equal (buffer-substring-no-properties (line-beginning-position) (line-end-position)) "❰x❱"))
+    (with-current-buffer buf (set-buffer-modified-p nil) (revert-buffer t t))))
+
+(ert-deftest kitty-lean-pins-follow-you-to-other-files ()
+  "A pin stays in the infoview in another file; RET on it goes there, u unpins it."
+  (kitty-lean-test--skip-unless-lean)
+  (kitty-lean-test--boot)
+  (let ((bad (kitty-lean-test--bad-with-goal)))
+    (setq kitty-lean--pins nil)
+    (kitty-lean-infoview-pin)
+    (let ((pinned (point))
+          (good (kitty-lean-test--visit "Demo/Good.lean")))
+      (should (kitty-lean-test--wait 30 (lambda () (eglot-managed-p))))
+      (kitty-lean-infoview-refresh good t)
+      (should (kitty-lean-test--infoview-shows 30 "Pinned at Bad.lean:4:2\n\\(.\\|\n\\)*⊢ a \\+ b = b \\+ a"))
+      (with-current-buffer kitty-lean-infoview-buffer-name
+        (goto-char (point-min)) (search-forward "Pinned at")
+        (kitty-lean-infoview-goto))
+      (should (eq (window-buffer (selected-window)) bad))
+      (should (= (window-point) pinned))
+      (switch-to-buffer good)
+      (with-current-buffer kitty-lean-infoview-buffer-name
+        (goto-char (point-min)) (search-forward "Pinned at")
+        (kitty-lean-infoview-unpin))
+      (should-not kitty-lean--pins)
+      (should (kitty-lean-test--wait 30 (lambda () (not (string-match-p "Pinned" (kitty-lean-test--infoview-text)))))))))

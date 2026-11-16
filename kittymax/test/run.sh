@@ -30,8 +30,10 @@ if command -v tlc >/dev/null 2>&1; then
         if [ -n "${4:-}" ] && cmp -s "$here/test/$2.tla" "$d/$2.tla"; then
             echo "$1: the mutation no longer applies"; status=1; return
         fi
-        if (cd "$d" && tlc -workers auto -config "$2.cfg" "$2.tla") >"$d/out" 2>&1 \
-           && grep -q 'No error has been found' "$d/out"; then got=pass; else got=fail; fi
+        (cd "$d" && tlc -workers auto -config "$2.cfg" "$2.tla") >"$d/out" 2>&1 || true
+        if grep -q 'No error has been found' "$d/out"; then got=pass
+        elif grep -qE 'is violated|were violated' "$d/out"; then got=fail
+        else echo "$1: TLC did not run the model"; cat "$d/out"; status=1; return; fi
         if [ "$got" = "$3" ]; then
             [ "$3" = pass ] && echo "$1: passes" || echo "$1: caught"
         else
@@ -47,7 +49,10 @@ if command -v tlc >/dev/null 2>&1; then
     tlc_case rpc kitty_lean_rpc pass
     tlc_case rpc-reconnect-per-call kitty_lean_rpc fail '' 's|Fix = TRUE|Fix = FALSE|'
     tlc_case start kitty_lean_start pass
-    tlc_case start-no-hand-over kitty_lean_start fail '' 's|Fix = TRUE|Fix = FALSE|'
+    tlc_case start-first-version kitty_lean_start fail '' 's|Design = "fixed"|Design = "pr"|'
+    tlc_case start-no-note kitty_lean_start fail '' 's|Design = "fixed"|Design = "nonote"|'
+    tlc_case start-eglot-timeout kitty_lean_start fail '' 's|Limit = 0|Limit = 1|'
+    tlc_case start-waiters-not-rearmed kitty_lean_start fail 's|/\\ ensure'"'"' = ensure \\cup {g \\in waiting : buf\[g\] = "open"}|/\\ UNCHANGED ensure|'
     rm -rf "$tmp"
 fi
 exit $status

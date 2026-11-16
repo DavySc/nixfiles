@@ -11,24 +11,26 @@ abbreviations, eglot setup for `lake serve`), eglot (the LSP client),
 below), elan from Nix to fetch each project's toolchain.
 
 Tested against Lean 4.35 and a real Lake project in `test/kitty-lean-test.el`
-(28 tests): the server, diagnostics, the infoview, progress, completion,
+(39 tests): the server, diagnostics, the infoview, progress, completion,
 definitions, hovers, `\` input, sorry, `Try this`, restart, `lake build` and
-run, and Org blocks with `C-c '`. Most of the rest are regression tests from a
-review that tried each feature against real Lean: K on subterms, session loss,
-pause, edits racing questions, a failed server start, and how fast Lean checks
-with the infoview open. Three TLA+ models (`test/kitty_lean*.tla`) cover the
-timing: the infoview's refresh, the RPC session, and one server per project.
-TLC checks each model, and also checks that it rejects the broken versions
-that the review found.
+run, and Org blocks with `C-c '`. Most of the rest are regression tests from
+two reviews that tried each feature against real Lean: K on subterms, session
+loss, pause, edits racing questions, failed, slow and hidden server starts,
+narrowed buffers, wide characters, and how fast Lean checks with the infoview
+open. Three TLA+ models (`test/kitty_lean*.tla`) cover the timing: the
+infoview's refresh, the RPC session, and one server per project (with the
+selected buffer and eglot's connect timeout). TLC checks each model, and also
+checks that it rejects the broken versions that the reviews found.
 
 ## Editing
 
 | VS Code | kittymax | |
 | --- | --- | --- |
-| Language server per project (`lake serve`), standalone files too | eglot with `lake serve`, project from `lakefile.lean` / `lakefile.toml` | done |
+| Language server per project (`lake serve`), standalone files too | eglot with `lake serve`, project from `lakefile.lean` / `lakefile.toml`; one server however many files open at once | done |
+| A first start shows elan's toolchain download, however long it takes | no connect timeout for Lean; the mode line shows what `lake` prints while it starts (` Lean starting: info: downloading…`) | done |
 | Syntax highlighting (TextMate) + semantic highlighting | nael's font-lock + eglot's semantic tokens (Emacs 31) | done |
 | Diagnostics: squiggles, Problems view | flymake: underlines, margin dots, end-of-line text; `SPC x x` project list; `]d` `[d` | done |
-| File progress: orange bars in the gutter, status bar | fringe bars on lines still being checked; ` ⧗ 42%` in the mode line | done |
+| File progress: orange bars in the gutter, status bar | fringe bars on lines still being checked; ` ⧗ 42%` in the mode line (doom-modeline's misc-info) | done |
 | "Unsolved goals" / "Goals accomplished" gutter decorations (Lean ≥ 4.20) | the infoview says "No goals"; no gutter mark at the end of a proof | gap |
 | Hover (type, docstring) | eldoc in the echo area, `K` for the full doc | done |
 | Completion: identifiers, dot, tactics, structure fields, imports | corfu on eglot's completion | done |
@@ -43,17 +45,17 @@ that the review found.
 | Folding (proof folding in Lean ≥ 4.37) | none (eglot has no folding ranges) | gap |
 | Sticky scroll | none | gap |
 | Code actions: `#guard_msgs` update, imports for unknown identifiers, `Try this` | `gra` / `SPC c a` for all of them; `\s` takes a `Try this` at once | done |
-| Restart File (`Ctrl+Shift+X`), Restart Server | `\r` / `SPC m R`, `\R` | done |
-| Auto-build dependencies when a file is opened | as `lake serve` does it (it builds imports when the file is opened) | done |
+| Restart File (`Ctrl+Shift+X`), Restart Server | `\r` / `SPC m R` (rebuilds out-of-date imports), `\R` (also a start that hangs) | done |
+| Opening a file does not build its imports (`lean4.automaticallyBuildDependencies` off): Lean says they are out of date, Restart File builds them | the same (`dependencyBuildMode` never on open, once on `\r`); `kitty-lean-build-dependencies` builds on open | done |
 | Read-only dependencies and toolchain sources | `.lake/packages`, `~/.elan/toolchains`, `/nix/store` open read-only | done |
 
 ## Unicode input
 
 | VS Code | kittymax | |
 | --- | --- | --- |
-| `\` abbreviations, the same table | nael's table (from vscode-lean4's `abbreviations.json`) | done |
+| `\` abbreviations, the same table | nael's table (from vscode-lean4's `abbreviations.json`), plus the 15 it lacks and `\\` for `\`; not `\+ ` (an Emacs abbreviation has no space) | done |
 | Eager replacement: `\forall` becomes `∀` the moment nothing longer can follow | the same: replaced as soon as the abbreviation is complete and no longer one starts with it | done |
-| Space, Tab, or any other character finishes it | space, punctuation, TAB (only the symbol, no indentation), leaving insert state | done |
+| Space, Tab, or any other character finishes it; an unfinished one (`\alp`) becomes the shortest abbreviation it starts (`α`) | the same: space, punctuation, any character that makes it the start of none, TAB (only the symbol, no indentation), leaving insert state | done |
 | `\<>` puts the cursor between `⟨` `⟩` | the same | done |
 | Hover shows how to type a symbol | `\\` on the symbol ("how to type this") | done |
 | Symbol picker, insert or copy | `\u` (consult over the table, insert) | done |
@@ -70,11 +72,11 @@ that the review found.
 | Expected type (term mode) | "Expected type" section (`getInteractiveTermGoal`) | done |
 | Messages at the cursor, full text | "Messages" section; a message spanning lines shows on each of them | done |
 | All Messages, with a count, sort, pause | the tally line ("All messages: 2 errors, 0 warnings, 1 info"); the list itself is `SPC x x` | partial |
-| Hover a term in the infoview: its type, docs | `K` on it | done |
+| Hover a term in the infoview: its type, docs, and hovers inside that | `K` on it, in a help buffer (no `K` inside that) | partial |
 | Go to definition from the infoview | `RET` / `gd` | done |
-| Pin a position, unpin | `\x` pins, `\c` clears | done |
+| Pin a position: its whole state stays on screen in any file; unpin it, go to it | `\x` pins the goals (not the expected type or messages), shown in every file; `RET` on it goes there, `u` unpins it, `\c` clears all | partial |
 | Go to the infoview | `\ TAB` | done |
-| Pause | `\p`, or `p` in the infoview | done |
+| Pause, and refresh while paused | `\p`, or `p` in the infoview; no refresh while paused | partial |
 | Hide instances / types / inaccessible names / let values; emphasize first goal; reverse order; goal diffs on or off | `\v` turns diffs, types and instances on or off (`\dd` diffs); inaccessible names (`a✝`) shown dimmed | partial |
 | Diff against a pinned position (lean.nvim's `\dx`) | none | gap |
 | Collapse goals and sections | none | gap |
@@ -89,7 +91,7 @@ that the review found.
 | --- | --- | --- |
 | New project (standalone / Mathlib) | `SPC m n`, `:LeanNew name [math]` (Mathlib: with the cache) | done |
 | Open / download a project | `git clone` + open (no command) | gap |
-| Build, clean, update dependency, fetch Mathlib cache (also per file) | `SPC m m` (errors as jumps, `C-u` for a target), `SPC m l` / `:Lake ...` for any `lake` command, `SPC m c` cache get | done (per-file cache: `:Lake exe cache get <file>`) |
+| Build (fetching the Mathlib cache first), clean, update dependency, fetch Mathlib cache (also per file), select the project's Lean version | `SPC m m` (the Mathlib cache first, as VS Code; errors as jumps, `C-u` for a target), `SPC m c` cache get; clean, update and the rest by hand: `SPC m l` / `:Lake ...` | partial |
 | Run a file's `main` | `SPC m r` (`lake env lean --run`) | done |
 | Select toolchain, update channels, elan default, uninstall | `elan` on the command line (`:!elan ...`); kittymax ships elan | partial |
 | Install elan when missing | elan comes with kittymax on Nix; on Windows, elan's own installer | partial |
@@ -97,7 +99,7 @@ that the review found.
 | Module hierarchy (imports / imported by), copy module name | none | gap |
 | Project search in Lean's and dependencies' sources | `\/` (ripgrep), `\f` (files) over the project, `.lake/packages`, and the toolchain's `src/lean` | done |
 | Loogle | `\l`: asks, lists the hits with type and module, inserts the one picked | partial (no LoogleView panel) |
-| Setup diagnostics (missing elan / git / curl, old Lean) | none (eglot says if `lake` is missing) | gap |
+| Setup diagnostics (missing elan / git / curl, old Lean) | one message when `lake` is missing, and the commands say why they can't; nothing else | partial |
 | Output view, server log | `M-x eglot-events-buffer` (off by default for speed) | partial |
 
 ## Org (what VS Code does not have)
