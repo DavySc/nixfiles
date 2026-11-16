@@ -95,6 +95,7 @@ let
       sql-indent
       sqlformat
       nix-ts-mode
+      nael # Lean 4: the major mode, \-abbreviations, Lean's LSP extensions for eglot
       eat
       dape # debugging, my-nvim's <leader>d
     ];
@@ -144,6 +145,9 @@ let
       # Nix
       nil
       nixfmt
+      # Lean 4: elan puts `lean` and `lake` on PATH and fetches the toolchain each
+      # project's lean-toolchain names (nixpkgs' elan patches what it downloads)
+      elan
     ]
     ++ lib.optional (sqldiff != null) sqldiff; # SQL: lint, cross-dialect diff
 in

@@ -22,7 +22,7 @@
 ;;   kitty-rss         elfeed: RSS and Atom feeds
 ;;   lang/*            C and C++ (+ msvc: Visual Studio's compiler and MSBuild), C#,
 ;;                     SQL (+ dbbliss: the database client, + sqldiff), Soufflé,
-;;                     Verilog and SystemVerilog, Nix
+;;                     Verilog and SystemVerilog, Nix, Lean 4
 
 (add-to-list 'load-path (expand-file-name "lisp" kitty-config-dir))
 (add-to-list 'load-path (expand-file-name "lisp/lang" kitty-config-dir))
@@ -47,7 +47,7 @@
 (kitty-load 'kitty-prog)
 (kitty-load 'kitty-rss)
 (dolist (lang '(kitty-msvc kitty-c kitty-csharp kitty-sql kitty-dbbliss kitty-sqldiff kitty-souffle
-                kitty-verilog kitty-nix))
+                kitty-verilog kitty-nix kitty-lean))
   (kitty-load lang))
 
 ;; Machine-specific settings (git-ignored): fonts, org directory, work SQL
