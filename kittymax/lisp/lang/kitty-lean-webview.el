@@ -665,7 +665,8 @@ A forgotten page's calls are dropped: it reloads when its stream is back."
         (if (and kitty-lean-webview--redirect (file-exists-p kitty-lean-webview--redirect))
             (write-region html nil kitty-lean-webview--redirect nil 'quiet)
           (setq kitty-lean-webview--redirect (make-temp-file "kitty-lean-infoview" nil ".html" html)))
-        (browse-url (concat "file://" kitty-lean-webview--redirect))))
+        ;; file:///C:/... on Windows, file:///tmp/... elsewhere
+        (browse-url (concat "file:///" (string-remove-prefix "/" kitty-lean-webview--redirect)))))
     url))
 
 (defun kitty-lean-webview--on-client-notification-safe (&rest args)

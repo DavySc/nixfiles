@@ -1668,7 +1668,10 @@ gone when the webview stops."
                  (should (= (length opened) 2))
                  (should (equal (car opened) (cadr opened)))
                  (should (file-exists-p kitty-lean-webview--redirect))
-                 (should (= (file-modes kitty-lean-webview--redirect) #o600)))
+                 (should (equal (car opened) (concat "file:///" (string-remove-prefix "/" kitty-lean-webview--redirect))))
+                 ;; private to you: by its mode, or on Windows by the ACL of your own temp directory
+                 (unless (eq system-type 'windows-nt)
+                   (should (= (file-modes kitty-lean-webview--redirect) #o600))))
         (let ((file kitty-lean-webview--redirect))
           (kitty-lean-webview-stop)
           (should-not (file-exists-p file)))))))
