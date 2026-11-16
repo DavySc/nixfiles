@@ -5,8 +5,8 @@
 
 ;; Startup is a burst of allocation: collect garbage every 32 MB, not every
 ;; 0.8 MB (kitty-core.el hands the threshold to gcmh afterwards).  Never
-;; collecting left 289 MB resident (Emacs keeps the memory its garbage took);
-;; 32 MB gives 171 MB, for 0.09 s more (test/kitty-perf-test.el keeps it).
+;; collecting cost a third more memory for good: Emacs keeps what its garbage
+;; took (test/kitty-perf-test.el keeps startup under 200 MB).
 (setq gc-cons-threshold (* 32 1024 1024))
 
 ;; Every file loaded at startup goes through these handlers; none is needed yet.

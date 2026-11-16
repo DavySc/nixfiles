@@ -201,7 +201,9 @@ GUI start would put a window in front of you."
   (let* ((out (expand-file-name "status" home))
          (process-environment
           (append (list (concat "XDG_DATA_HOME=" home "/data") (concat "XDG_CACHE_HOME=" home "/cache")
-                        "TERM=xterm-256color")
+                        ;; a terminal Emacs asks xterm questions a pty never answers: 4 s of waiting
+                        "TERM=linux"
+                        (concat "KITTYMAX_PACKAGES=" (or (getenv "KITTYMAX_PACKAGES") "none")))
                   process-environment))
          (report `(add-hook 'emacs-startup-hook
                             (lambda ()
@@ -223,11 +225,10 @@ GUI start would put a window in front of you."
 
 (ert-deftest kitty-perf-startup-memory ()
   "kittymax starts in under 200 MB.
-Never collecting garbage while starting left 289 MB (GUI) / 238 MB (terminal);
-collecting every 32 MB, 171 / 154 MB."
+A first start, with empty caches.  Never collecting garbage while starting
+left 289 MB (GUI) / 238 MB (terminal); collecting every 32 MB, 171 / 154 MB."
   (skip-unless (file-readable-p "/proc/self/status"))
   (let ((home (make-temp-file "kitty-home" t)))
-    (kitty-perf--startup-mb home)       ; the first start fills the caches
     (let ((mb (kitty-perf--startup-mb home)))
       (message "kittymax holds %s MB after starting" mb)
       (should (numberp mb))

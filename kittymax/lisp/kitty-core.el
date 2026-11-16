@@ -15,8 +15,9 @@
 
 ;;;; State directories (no-littering sends everything to var/ and etc/)
 
-(setq no-littering-etc-directory (expand-file-name "etc/" kitty-data-dir)
-      no-littering-var-directory (expand-file-name "var/" kitty-data-dir))
+(eval-and-compile                       ; compiling this file loads no-littering too
+  (setq no-littering-etc-directory (expand-file-name "etc/" kitty-data-dir)
+        no-littering-var-directory (expand-file-name "var/" kitty-data-dir)))
 (require 'no-littering nil t)
 (setq custom-file (expand-file-name "custom.el" kitty-data-dir))
 (when (file-exists-p custom-file) (load custom-file nil 'nomessage))
