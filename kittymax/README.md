@@ -357,7 +357,8 @@ on `C-c '`. [LEAN.md](LEAN.md) goes through every feature of the VS Code
 extension: what is the same, what is less, what is missing (widgets mostly).
 
 lean.nvim's keys, on `\` in normal state: `i` infoview, `x` pin the goals
-here, `c` clear pins, `p` pause, `r` restart file, `R` restart server, `s`
+here, `c` clear pins, `p` pause, `TAB` to the infoview, `v` its options,
+`dd` colour goal changes or not, `r` restart file, `R` restart server, `s`
 accept `Try this`, `S` a `sorry` per goal, `u` symbols, `\\` how to type the
 symbol under the cursor, `l` Loogle, `/` grep Lean's and the dependencies'
 sources, `f` their files. `:Lake build`, `:LeanNew name [math]` as in my-nvim.

@@ -15,33 +15,39 @@ for t in kitty-lib kitty-platform kitty-smoke kitty-keys kitty-evil kitty-splash
     "$emacs" --batch -q -L "$here/lisp" -L "$here/lisp/lang" \
         -l "$here/test/$t-test.el" -f ert-run-tests-batch-and-exit || status=1
 done
-# The infoview's refresh, as a TLA+ model (kitty_lean.tla): TLC checks it,
-# and checks that it would catch the two mistakes it is there for.
+# The timing of kitty-lean.el as TLA+ models: TLC checks each, and checks
+# that it rejects the broken versions they are there to catch.
+#   kitty_lean.tla        the infoview's refresh (generations, forced refresh, flushed edits)
+#   kitty_lean_rpc.tla    Lean's RPC session, lost and found again
+#   kitty_lean_start.tla  one server per project while it starts
 if command -v tlc >/dev/null 2>&1; then
-    printf '== kitty_lean.tla\n'
     tmp=$(mktemp -d)
-    tlc_run() {  # DIR: 0 when TLC finds no error
-        (cd "$1" && tlc -workers auto -config kitty_lean.cfg kitty_lean.tla) >"$1/out" 2>&1
-        grep -q 'No error has been found' "$1/out"
-    }
-    for m in model no-generation-check no-forced-refresh; do
-        mkdir "$tmp/$m"
-        cp "$here/test/kitty_lean.cfg" "$tmp/$m/"
-        case $m in
-            model) cp "$here/test/kitty_lean.tla" "$tmp/$m/" ;;
-            no-generation-check)
-                sed 's|IF a.g = gen /\\ a.ok|IF a.ok|' "$here/test/kitty_lean.tla" >"$tmp/$m/kitty_lean.tla" ;;
-            no-forced-refresh)
-                sed '/^CheckingDone ==/,/^$/s|Refresh(TRUE)|Refresh(FALSE)|' "$here/test/kitty_lean.tla" >"$tmp/$m/kitty_lean.tla" ;;
-        esac
-        if cmp -s "$here/test/kitty_lean.tla" "$tmp/$m/kitty_lean.tla" && [ "$m" != model ]; then
-            echo "$m: the mutation no longer applies"; status=1
-        elif tlc_run "$tmp/$m"; then
-            [ "$m" = model ] && echo "model: passes" || { echo "$m: TLC missed it"; status=1; }
-        else
-            [ "$m" = model ] && { cat "$tmp/$m/out"; status=1; } || echo "$m: caught"
+    # NAME MODULE EXPECT(pass|fail) [SED-ON-TLA] [SED-ON-CFG]
+    tlc_case() {
+        d="$tmp/$1"; mkdir "$d"
+        sed "${4:-}" "$here/test/$2.tla" >"$d/$2.tla"
+        sed "${5:-}" "$here/test/$2.cfg" >"$d/$2.cfg"
+        if [ -n "${4:-}" ] && cmp -s "$here/test/$2.tla" "$d/$2.tla"; then
+            echo "$1: the mutation no longer applies"; status=1; return
         fi
-    done
+        if (cd "$d" && tlc -workers auto -config "$2.cfg" "$2.tla") >"$d/out" 2>&1 \
+           && grep -q 'No error has been found' "$d/out"; then got=pass; else got=fail; fi
+        if [ "$got" = "$3" ]; then
+            [ "$3" = pass ] && echo "$1: passes" || echo "$1: caught"
+        else
+            [ "$3" = pass ] && cat "$d/out" || echo "$1: TLC missed it"
+            status=1
+        fi
+    }
+    printf '== TLA+ models\n'
+    tlc_case refresh kitty_lean pass
+    tlc_case refresh-no-generation-check kitty_lean fail 's|IF a.g = gen /\\ a.ok|IF a.ok|'
+    tlc_case refresh-no-forced-refresh kitty_lean fail '/^CheckingDone ==/,/^$/s|Refresh(TRUE)|Refresh(FALSE)|'
+    tlc_case refresh-no-flush kitty_lean fail '' 's|Fix = TRUE|Fix = FALSE|'
+    tlc_case rpc kitty_lean_rpc pass
+    tlc_case rpc-reconnect-per-call kitty_lean_rpc fail '' 's|Fix = TRUE|Fix = FALSE|'
+    tlc_case start kitty_lean_start pass
+    tlc_case start-no-hand-over kitty_lean_start fail '' 's|Fix = TRUE|Fix = FALSE|'
     rm -rf "$tmp"
 fi
 exit $status

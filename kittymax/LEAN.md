@@ -11,11 +11,15 @@ abbreviations, eglot setup for `lake serve`), eglot (the LSP client),
 below), elan from Nix to fetch each project's toolchain.
 
 Tested against Lean 4.35 and a real Lake project in `test/kitty-lean-test.el`
-(17 tests: the server, diagnostics, the infoview, progress, completion,
+(28 tests): the server, diagnostics, the infoview, progress, completion,
 definitions, hovers, `\` input, sorry, `Try this`, restart, `lake build` and
-run, Org blocks and `C-c '`). The infoview's refresh is also a TLA+ model
-(`test/kitty_lean.tla`) that TLC checks, along with two broken versions of it
-that it must catch.
+run, and Org blocks with `C-c '`. Most of the rest are regression tests from a
+review that tried each feature against real Lean: K on subterms, session loss,
+pause, edits racing questions, a failed server start, and how fast Lean checks
+with the infoview open. Three TLA+ models (`test/kitty_lean*.tla`) cover the
+timing: the infoview's refresh, the RPC session, and one server per project.
+TLC checks each model, and also checks that it rejects the broken versions
+that the review found.
 
 ## Editing
 
@@ -49,7 +53,7 @@ that it must catch.
 | --- | --- | --- |
 | `\` abbreviations, the same table | nael's table (from vscode-lean4's `abbreviations.json`) | done |
 | Eager replacement: `\forall` becomes `∀` the moment nothing longer can follow | the same: replaced as soon as the abbreviation is complete and no longer one starts with it | done |
-| Space, Tab, or any other character finishes it | space, punctuation, leaving insert state | done |
+| Space, Tab, or any other character finishes it | space, punctuation, TAB (only the symbol, no indentation), leaving insert state | done |
 | `\<>` puts the cursor between `⟨` `⟩` | the same | done |
 | Hover shows how to type a symbol | `\\` on the symbol ("how to type this") | done |
 | Symbol picker, insert or copy | `\u` (consult over the table, insert) | done |
@@ -69,8 +73,10 @@ that it must catch.
 | Hover a term in the infoview: its type, docs | `K` on it | done |
 | Go to definition from the infoview | `RET` / `gd` | done |
 | Pin a position, unpin | `\x` pins, `\c` clears | done |
+| Go to the infoview | `\ TAB` | done |
 | Pause | `\p`, or `p` in the infoview | done |
-| Hide instances / types / inaccessible names / let values; emphasize first goal; reverse order | instances and types (`kitty-lean-infoview-hide-*`); inaccessible names (`a✝`) shown dimmed | partial |
+| Hide instances / types / inaccessible names / let values; emphasize first goal; reverse order; goal diffs on or off | `\v` turns diffs, types and instances on or off (`\dd` diffs); inaccessible names (`a✝`) shown dimmed | partial |
+| Diff against a pinned position (lean.nvim's `\dx`) | none | gap |
 | Collapse goals and sections | none | gap |
 | Copy a goal to the editor / as a comment | yank from the infoview buffer | partial |
 | Widgets: `Try this` buttons, ProofWidgets, `conv?` shift-click, user widgets (React) | `Try this` through `\s` / code actions; no rendering of other widgets | gap |

@@ -300,11 +300,13 @@ the infoview from the one you are in, as in VS Code."
           (kitty-lean--on-progress uri (vector (list :range (list :start (list :line 0 :character 0) :end (list :line 1 :character 0)) :kind 1)))
           (kitty-lean--on-progress uri []))
         (kitty-lean--after-diagnostics))
+      ;; (diagnostics refresh after a moment, gathered: see the next test)
+      (kitty-lean-test--wait 1 #'ignore)
       (should (eq kitty-lean--source buf))
       (should (= gen kitty-lean--gen))
       ;; the one in the selected window still does
       (kitty-lean--after-diagnostics)
-      (should (> kitty-lean--gen gen)))))
+      (should (kitty-lean-test--wait 2 (lambda () (> kitty-lean--gen gen)))))))
 
 (ert-deftest kitty-lean-unicode-input ()
   "\\a then a space → α, \\N then Escape → ℕ, \\<> → ⟨⟩ with the cursor inside, \\forall at once."
@@ -319,6 +321,12 @@ the infoview from the one you are in, as in VS Code."
     (should (equal (buffer-substring-no-properties (line-beginning-position 0) (line-end-position)) "⟨x⟩\n⟨x"))
     (execute-kbd-macro (kbd "<escape>"))
     ;; complete and the start of nothing longer: at once, as VS Code
+    (let ((completion-ignore-case t))   ; as kittymax has it: \\alpha is still not \\Alpha
+      (execute-kbd-macro (kbd "<escape> o \\ a l p h a"))
+      (should (equal (buffer-substring-no-properties (line-beginning-position) (line-end-position)) "α")))
+    (execute-kbd-macro (kbd "<escape> o \\ N TAB"))
+    (should (equal (buffer-substring-no-properties (line-beginning-position) (line-end-position)) "ℕ"))
+    (execute-kbd-macro (kbd "<escape>"))
     (execute-kbd-macro (kbd "o \\ f o r a l l"))
     (should (equal (buffer-substring-no-properties (line-beginning-position) (line-end-position)) "∀"))
     (execute-kbd-macro (kbd "<escape>"))
@@ -412,6 +420,202 @@ before eglot's `exit' reaches it, some of the time: so, ten times)."
       (kill-buffer buf)
       (should-not (buffer-live-p buf))
       (should (kitty-lean-test--wait 10 (lambda () (not (jsonrpc-running-p server))))))))
+
+(defun kitty-lean-test--bad-with-goal ()
+  "Bad.lean checked, the infoview on its unsolved goal."
+  (kitty-lean-test--fresh)
+  (let ((buf (kitty-lean-test--visit "Demo/Bad.lean")))
+    (should (kitty-lean-test--wait 60 (lambda () (eglot-managed-p))))
+    (should (kitty-lean-test--wait 120 (lambda () (>= (length (kitty-lean-test--errors buf)) 2))))
+    (should (kitty-lean-test--wait 60 (lambda () (not (kitty-lean-busy-p buf)))))
+    (unless (kitty-lean--infoview-window) (kitty-lean-infoview-open))
+    (goto-char (point-min)) (forward-line 3) (back-to-indentation)
+    (kitty-lean-infoview-refresh buf t)
+    (should (kitty-lean-test--infoview-shows 30 "⊢ a \\+ b = b \\+ a"))
+    buf))
+
+(defun kitty-lean-test--hover-a ()
+  "K on the goal's `a' in the infoview: what it says."
+  (with-current-buffer kitty-lean-infoview-buffer-name
+    (goto-char (point-min)) (search-forward "⊢ a") (backward-char 1)
+    (kitty-lean-infoview-hover)
+    (with-current-buffer "*Lean term*" (buffer-substring-no-properties (point-min) (point-max)))))
+
+(ert-deftest kitty-lean-infoview-terms-are-the-ones-under-the-cursor ()
+  "K on `a' in `a + b = b + a' is about `a', not the whole equation."
+  (kitty-lean-test--skip-unless-lean)
+  (kitty-lean-test--boot)
+  (kitty-lean-test--bad-with-goal)
+  (with-current-buffer kitty-lean-infoview-buffer-name
+    (goto-char (point-min)) (search-forward "⊢ ")
+    (let ((line (buffer-substring (point) (line-end-position))))
+      (should (> (length (delete-dups (mapcar (lambda (i) (get-text-property i 'kitty-lean-info line))
+                                              (number-sequence 0 (1- (length line))))))
+                 3))))
+  (should (string-match-p "\\`a : Nat" (kitty-lean-test--hover-a))))
+
+(ert-deftest kitty-lean-a-lost-session-is-found-again ()
+  "Lean forgets an RPC session nobody kept alive (a laptop asleep): the
+infoview connects once more, and K works on what it shows."
+  (kitty-lean-test--skip-unless-lean)
+  (kitty-lean-test--boot)
+  (let ((buf (kitty-lean-test--bad-with-goal)) (connects 0))
+    (cl-letf* ((orig (symbol-function 'jsonrpc-request))
+               ((symbol-function 'jsonrpc-request)
+                (lambda (c m &rest r) (when (eq m :$/lean/rpc/connect) (cl-incf connects)) (apply orig c m r))))
+      ;; K right away, on references of a session Lean no longer has
+      (with-current-buffer buf (setq kitty-lean--rpc-session "12345"))
+      (should (string-match-p "out of date" (condition-case e (kitty-lean-test--hover-a) (user-error (cadr e)))))
+      (should (kitty-lean-test--wait 30 (lambda () (= connects 1))))
+      (should (kitty-lean-test--infoview-shows 30 "⊢ a \\+ b = b \\+ a"))
+      (should (string-match-p "\\`a : Nat" (kitty-lean-test--hover-a)))
+      ;; the infoview's own refresh on a lost session: one new session, not one per call
+      (setq connects 0)
+      (with-current-buffer buf (setq kitty-lean--rpc-session "12345"))
+      (kitty-lean-infoview-refresh buf t)
+      (kitty-lean-test--wait 3 #'ignore)
+      (should (kitty-lean-test--infoview-shows 30 "⊢ a \\+ b = b \\+ a"))
+      (should (= connects 1))
+      (should (string-match-p "\\`a : Nat" (kitty-lean-test--hover-a))))))
+
+(ert-deftest kitty-lean-paused-means-paused ()
+  "An answer on its way when you pause does not change the infoview."
+  (kitty-lean-test--skip-unless-lean)
+  (kitty-lean-test--boot)
+  (let ((buf (kitty-lean-test--bad-with-goal)))
+    (goto-char (point-min)) (forward-char 16)
+    (kitty-lean-infoview-refresh buf t)
+    (let ((before (kitty-lean-test--infoview-text)))
+      (kitty-lean-infoview-toggle-pause)
+      (kitty-lean-test--wait 3 #'ignore)
+      (should (equal before (kitty-lean-test--infoview-text)))
+      (kitty-lean-infoview-toggle-pause))))
+
+(ert-deftest kitty-lean-edits-reach-lean-before-questions ()
+  "\\S right after typing a tactic sees the new text (eglot sends edits only
+when idle; the question would otherwise be about the old text)."
+  (kitty-lean-test--skip-unless-lean)
+  (kitty-lean-test--boot)
+  (kitty-lean-test--write (kitty-lean-test--project) "Two.lean" "example : True ∧ True := by\n  skip\n")
+  (let ((buf (kitty-lean-test--visit "Two.lean")))
+    (should (kitty-lean-test--wait 60 (lambda () (eglot-managed-p))))
+    (should (kitty-lean-test--wait 60 (lambda () (flymake-diagnostics))))
+    (goto-char (point-min)) (forward-line 1) (back-to-indentation)
+    (delete-region (point) (line-end-position)) (insert "constructor")
+    (kitty-lean-sorry-fill)
+    (should (string-match-p "· sorry\n +· sorry" (buffer-string)))
+    (with-current-buffer buf (set-buffer-modified-p nil) (kill-buffer))))
+
+(ert-deftest kitty-lean-revert-leaves-no-progress-marks ()
+  (kitty-lean-test--skip-unless-lean)
+  (kitty-lean-test--boot)
+  (let ((buf (kitty-lean-test--bad-with-goal)))
+    (kitty-lean--on-progress (plist-get (eglot--TextDocumentIdentifier) :uri)
+                             (vector (list :range (list :start (list :line 2 :character 0) :end (list :line 5 :character 0)) :kind 1)))
+    (should (kitty-lean-test--wait 2 (lambda () (= 1 (length kitty-lean--progress-overlays)))))
+    (revert-buffer t t)
+    (kitty-lean-test--wait 20 (lambda () (and (eglot-managed-p) (not (kitty-lean-busy-p buf)))))
+    (should-not (seq-filter (lambda (o) (overlay-get o 'kitty-lean-progress)) (overlays-in (point-min) (point-max))))))
+
+(ert-deftest kitty-lean-checking-says-so ()
+  "Before Lean has an answer (imports building), the infoview says it is checking."
+  (kitty-lean-test--skip-unless-lean)
+  (kitty-lean-test--boot)
+  (let ((buf (kitty-lean-test--bad-with-goal)))
+    (with-current-buffer kitty-lean-infoview-buffer-name (let ((inhibit-read-only t)) (erase-buffer)))
+    (setq kitty-lean--rendered nil)
+    (cl-letf (((symbol-function 'kitty-lean--ask-goals) #'ignore))
+      (kitty-lean--on-progress (plist-get (eglot--TextDocumentIdentifier) :uri)
+                               (vector (list :range (list :start (list :line 0 :character 0) :end (list :line 5 :character 0)) :kind 1)))
+      (kitty-lean-infoview-refresh buf t)
+      (should (string-match-p "Lean is checking the file" (kitty-lean-test--infoview-text))))
+    (kitty-lean--on-progress (plist-get (eglot--TextDocumentIdentifier) :uri) [])))
+
+(ert-deftest kitty-lean-new-project-opens-its-library ()
+  "Lake names the library itself: my-proj's is MyProj."
+  (let ((dir (make-temp-file "kitty-new" t)))
+    (make-directory (expand-file-name "MyProj" dir))
+    (dolist (f '("Main.lean" "MyProj.lean" "MyProj/Basic.lean"))
+      (kitty-lean-test--write dir f "\n"))
+    (should (equal (kitty-lean--new-project-file dir) (expand-file-name "MyProj/Basic.lean" dir)))))
+
+(ert-deftest kitty-lean-org-tab-is-only-indentation ()
+  "TAB in a lean block of an org file (org edits the block in a hidden buffer
+for it): no scratch file, no server."
+  (kitty-lean-test--skip-unless-lean)
+  (kitty-lean-test--boot)
+  (kitty-lean-test--fresh)
+  (require 'org)
+  (clrhash kitty-lean--starts)
+  (let ((scratch (expand-file-name ".lake/kittymax-org/" (kitty-lean-test--project)))
+        (org-src-tab-acts-natively t))
+    (with-current-buffer (find-file-noselect (expand-file-name "t.org" (make-temp-file "kitty-org" t)))
+      (switch-to-buffer (current-buffer))
+      (insert (format "#+begin_src lean :project %s\ntheorem g : 1 = 1 := by\nskip\n#+end_src\n" (kitty-lean-test--project)))
+      (goto-char (point-min)) (forward-line 2)
+      (dotimes (_ 3) (org-indent-line))
+      (should-not (and (file-directory-p scratch) (directory-files scratch nil "\\.lean\\'")))
+      (should (zerop (hash-table-count kitty-lean--starts)))
+      (set-buffer-modified-p nil) (kill-buffer))))
+
+(ert-deftest kitty-lean-open-infoview-does-not-slow-lean ()
+  "Lean sends diagnostics line by line as it checks; the infoview asks again
+after a pause in them, not on each (each question waits for the check:
+hundreds of them made Lean 40 times slower)."
+  (kitty-lean-test--skip-unless-lean)
+  (kitty-lean-test--boot)
+  (kitty-lean-test--fresh)
+  (kitty-lean-test--write (kitty-lean-test--project) "Many.lean"
+                          (mapconcat (lambda (i) (format "theorem t%d (a b : Nat) : a + b = b + a := by\n  skip\n  omega\n#eval %d\n" i i))
+                                     (number-sequence 1 100) ""))
+  (let ((seen nil)
+        (buf (kitty-lean-test--visit "Many.lean"))
+        (t0 (float-time)))
+    (should (kitty-lean-test--wait 60 (lambda () (eglot-managed-p))))
+    (unless (kitty-lean--infoview-window) (kitty-lean-infoview-open))
+    (goto-char (point-max)) (forward-line -2)
+    (should (kitty-lean-test--wait 120 (lambda ()
+                                         (when (kitty-lean-busy-p buf) (setq seen t))
+                                         (and seen (>= (length (flymake-diagnostics)) 100)
+                                              (not (kitty-lean-busy-p buf))))))
+    (message "100 theorems, infoview open: checked in %.1fs" (- (float-time) t0))
+    ;; 2 s here, gathered; 32 s with a refresh per report
+    (should (< (- (float-time) t0) 15))
+    (set-buffer-modified-p nil) (kill-buffer buf)))
+
+(defvar nael-eglot-contact)
+
+(ert-deftest kitty-lean-a-failed-start-is-not-waited-for ()
+  "The project's server does not start (lake exits): the next file starts it
+again instead of waiting for nothing.  test/kitty_lean_start.tla's Fix."
+  (kitty-lean-test--skip-unless-lean)
+  (kitty-lean-test--boot)
+  (kitty-lean-test--fresh)
+  (kitty-lean-test--wait 3 #'ignore)
+  (clrhash kitty-lean--starts)
+  ;; (a server that starts and exits is the same hand-over, from eglot's
+  ;; shutdown handler; batch Emacs dies of the error eglot raises there)
+  (let ((nael-eglot-contact '("kitty-lean-no-such-lake" "serve")))
+    (kitty-lean-test--visit "Demo/Good.lean")
+    (kitty-lean-test--wait 5 #'ignore)
+    (should-not (eglot-managed-p)))
+  ;; lake works again (the toolchain is there now)
+  (should (with-current-buffer (kitty-lean-test--visit "Demo/Bad.lean")
+            (kitty-lean-test--wait 30 (lambda () (eglot-managed-p))))))
+
+(ert-deftest kitty-lean-a-file-opened-while-starting-is-served ()
+  "Two files open while the server starts and the one starting it is closed
+before it did: the other still gets the server.  test/kitty_lean_start.tla."
+  (kitty-lean-test--skip-unless-lean)
+  (kitty-lean-test--boot)
+  (kitty-lean-test--fresh)
+  (kitty-lean-test--wait 3 #'ignore)
+  (clrhash kitty-lean--starts)
+  (let* ((a (find-file-noselect (expand-file-name "Demo/Good.lean" (kitty-lean-test--project))))
+         (b (kitty-lean-test--visit "Demo/Bad.lean")))
+    ;; a never had a command (no post-command-hook): its start never ran
+    (kill-buffer a)
+    (should (kitty-lean-test--wait 30 (lambda () (with-current-buffer b (eglot-managed-p)))))))
 
 (ert-deftest kitty-lean-restart-file-checks-again ()
   (kitty-lean-test--skip-unless-lean)
