@@ -33,7 +33,7 @@
     (should-not warnings)
     (dolist (m '(kitty-core kitty-ui kitty-splash kitty-cat kitty-evil kitty-vim kitty-completion kitty-vc
                  kitty-dired kitty-org kitty-markdown kitty-prog kitty-rss kitty-c kitty-csharp
-                 kitty-msvc kitty-sql kitty-dbbliss kitty-sqldiff kitty-souffle kitty-verilog kitty-nix))
+                 kitty-msvc kitty-sql kitty-dbbliss kitty-sqldiff kitty-souffle kitty-verilog kitty-nix kitty-lean))
       (should (assq m kitty--load-times))
       (should (featurep m)))))
 
@@ -42,7 +42,7 @@
   (unless (featurep 'kitty-core) (kitty-test--boot))
   (dolist (m '(kitty-core kitty-ui kitty-splash kitty-cat kitty-evil kitty-vim kitty-completion kitty-vc
                kitty-dired kitty-org kitty-markdown kitty-prog kitty-rss kitty-c kitty-csharp
-               kitty-msvc kitty-sql kitty-dbbliss kitty-sqldiff kitty-souffle kitty-verilog kitty-nix))
+               kitty-msvc kitty-sql kitty-dbbliss kitty-sqldiff kitty-souffle kitty-verilog kitty-nix kitty-lean))
     (should (file-exists-p (expand-file-name (format "elc/%s.elc" m) kitty-cache-dir)))))
 
 (ert-deftest kitty-smoke-leader-tree ()
@@ -80,6 +80,8 @@
                    (verilog-mode "w" kitty-verilog-waves)
                    (verilog-mode "i m" verilog-sk-module)
                    (nix-ts-mode "f" kitty-format)
+                   (nael-mode "m" kitty-lean-build)
+                   (nael-mode "r" kitty-lean-run-file)
                    (elfeed-search-mode "a" kitty-rss-mark-all-read)))
     (let* ((map (gethash (nth 0 probe) kitty--local-leaders))
            (b (and map (lookup-key map (kbd (nth 1 probe))))))

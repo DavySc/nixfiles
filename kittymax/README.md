@@ -5,7 +5,7 @@ magit, dired, elfeed ...) without retraining my fingers: Neovim
 ([my-nvim](https://github.com/DavySc/my-nvim)) is the main editor and the
 source of truth for every key. evil, catppuccin mocha, built for NixOS and
 native Windows, fast to start, and good at the things I write: org, markdown,
-C, C++, C#, SQL, Soufflé, Verilog / SystemVerilog, Nix.
+C, C++, C#, SQL, Soufflé, Verilog / SystemVerilog, Nix, Lean 4.
 
 On my Windows work machine it stands in for two heavy programs: **SQL Server
 Management Studio** ([Databases](#databases-in-place-of-ssms)) and **Visual
@@ -32,7 +32,7 @@ lisp/kitty-ob-csharp C# org blocks through .NET 10's file-based apps
 lisp/kitty-markdown  the markdown editing experience
 lisp/kitty-prog      tree-sitter, eglot (+ emacs-lsp-booster), flymake, apheleia
 lisp/kitty-rss       elfeed: RSS and Atom feeds
-lisp/lang/           c (+ msvc), csharp, sql (+ dbbliss, sqldiff), souffle, verilog, nix
+lisp/lang/           c (+ msvc), csharp, sql (+ dbbliss, sqldiff), souffle, verilog, nix, lean
 package.nix          Emacs with all packages + language servers + tools = `kittymax`
 windows/             kittymax.cmd (launcher) and install.ps1 (winget) for native Windows
 test/                ERT tests (test/run.sh)
@@ -95,7 +95,8 @@ Different on Windows:
   Rustlang.Rustup`) and `cargo install --git https://github.com/DavySc/SQLDiff
   sqldiff-cli`, which puts `sqldiff.exe` in `%USERPROFILE%\.cargo\bin`.
   Without it the SQL lint and diff are off; T-SQL formatting wants sqlfluff
-  (`pip install sqlfluff`).
+  (`pip install sqlfluff`). Lean 4: install elan with its installer
+  (`elan-init.ps1` from leanprover/elan); nael comes from MELPA.
 - `SPC f u` (sudo) does not exist; pasting an image from the clipboard
   (`SPC m i p`) goes through PowerShell; dired uses Emacs's own `ls`.
 - State is under `%LOCALAPPDATA%\kittymax` (`data` kept, `cache` disposable,
@@ -229,6 +230,7 @@ filters. Entries are shown wrapped and centred like markdown.
 | Soufflé | | | `m` check and run (errors are jumps), `r` run with facts from the file's directory |
 | Verilog, SystemVerilog | verible | verible | `m` verilator lint, `r` iverilog + vvp, `w` gtkwave, AUTOs, templates |
 | Nix | nil | nixfmt | rebuild |
+| Lean 4 | `lake serve` (elan picks the toolchain) | | `m` lake build, `r` run main, `c` Mathlib cache, `l` lake ..., `n` new project, `i` infoview, `R` restart file |
 
 Verilog buffers are also linted by verilator as you type (flymake), for the
 checks a language server does not do: widths, unused and undriven signals.
@@ -342,6 +344,33 @@ build`); otherwise `windows\install.ps1` (or `M-x kitty-dbbliss-build`) builds
 one in kittymax's data directory. It needs the .NET 10 SDK to build, not to run.
 Not ported from dbbliss.nvim: the sessions list, backup, drop and `:Dbbliss
 ask`; my-nvim has them.
+
+## Lean 4 (in place of VS Code)
+
+What makes Lean usable in VS Code, here: the language server per Lake
+project, the **infoview** (`*Lean Infoview*`: goals with what the last tactic
+changed, the expected type, the messages at the cursor, pins, pause), the
+orange **checking** bars (in the fringe, and ` ⧗ 42%` in the mode line), and
+**`\` input** that turns `\forall` into `∀` as soon as it is complete, as VS
+Code does. Lean blocks in **Org** run with `C-c C-c` and get the whole server
+on `C-c '`. [LEAN.md](LEAN.md) goes through every feature of the VS Code
+extension: what is the same, what is less, what is missing (widgets mostly).
+
+lean.nvim's keys, on `\` in normal state: `i` infoview, `x` pin the goals
+here, `c` clear pins, `p` pause, `r` restart file, `R` restart server, `s`
+accept `Try this`, `S` a `sorry` per goal, `u` symbols, `\\` how to type the
+symbol under the cursor, `l` Loogle, `/` grep Lean's and the dependencies'
+sources, `f` their files. `:Lake build`, `:LeanNew name [math]` as in my-nvim.
+In the infoview: `RET` / `gd` definition, `K` type and docs, `p` pause, `q`.
+
+Dependencies and the toolchain open read-only. A Lean block in Org:
+
+```org
+#+begin_src lean :project ~/math
+import Mathlib
+#eval (2 : ℚ) / 3
+#+end_src
+```
 
 ## C and C# (in place of Visual Studio)
 
@@ -473,7 +502,10 @@ the database client against a fake backend that speaks dbbliss's protocol (and
 a real process over a pipe), MSBuild's evaluation read back from a real
 `msbuild` and the `cl.exe` command lines clangd gets from it, dotnet's and
 cl.exe's error lines as jumps, Soufflé's errors against souffle 2.5's own
-output, org's clock, habits in the agenda, Word export read back through
+output, Lean against a real Lake project (`lake serve`: diagnostics, the
+infoview, progress, completion, definitions, `\` input, `lake build`, Org
+blocks and `C-c '`; TLC also model-checks the infoview's refresh when `tlc`
+is installed), org's clock, habits in the agenda, Word export read back through
 pandoc, C and C# blocks really run, org-roam's links in its database, and the
 keystroke budgets above. Also: every my-nvim
 leader key against the command it should run here (`kitty-keys-test.el`, with

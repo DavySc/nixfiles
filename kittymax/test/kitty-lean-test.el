@@ -1,0 +1,556 @@
+;;; kitty-lean-test.el --- Lean 4, through the whole configuration and a real server  -*- lexical-binding: t; -*-
+
+;;   kittymax/test/run.sh, or:
+;;   emacs --batch -q -L lisp -L lisp/lang -l test/kitty-lean-test.el -f ert-run-tests-batch-and-exit
+;;
+;; The first tests need nothing.  The rest boot kittymax and open a small Lake
+;; project in a real Lean server (`lake serve'): they need nael, and `lean' and
+;; `lake' on PATH (elan, or nixpkgs' lean4), and are skipped without them.  As
+;; my-nvim's tests/lean_test.lua does for lean.nvim.
+
+(require 'ert)
+(require 'cl-lib)
+
+(defvar kitty-lean-test--root
+  (file-name-directory (directory-file-name (file-name-directory (or load-file-name buffer-file-name)))))
+
+;;;; Without a server
+
+(defvar kitty-cache-dir)
+(defvar kitty-data-dir)
+(defvar kitty-config-dir)
+(unless (boundp 'kitty-cache-dir)
+  (setq kitty-cache-dir (make-temp-file "kitty-cache" t)
+        kitty-data-dir kitty-cache-dir
+        kitty-config-dir kitty-lean-test--root))
+(require 'kitty-lib)
+(require 'kitty-lean)
+
+;; `lake build''s own output (Lean 4.35)
+(defconst kitty-lean-test--lake-output "✖ [2/4] Building Demo.Bad (252ms)
+trace: .> LEAN_PATH=/p/.lake/build/lib/lean lean /p/Demo/Bad.lean -o x --json
+error: Demo/Bad.lean:1:15: Type mismatch
+  \"s\"
+has type
+  String
+error: Demo/Bad.lean:3:41: unsolved goals
+a b : Nat
+⊢ a + b = b + a
+warning: ./Demo/Other.lean:6:8: declaration uses `sorry`
+info: Demo/Bad.lean:6:0: 2
+Some required targets logged failures:
+- Demo.Bad
+error: build failed
+")
+
+(ert-deftest kitty-lean-lake-messages-are-jumps ()
+  "Lake's errors, warnings and infos: file, line, 1-based column, severity."
+  (with-temp-buffer
+    (insert kitty-lean-test--lake-output)
+    (goto-char (point-min))
+    (let (found)
+      (while (re-search-forward kitty-lean-lake-error-regexp nil t)
+        (push (list (match-string 1) (match-string 2) (kitty-lean--column)
+                    (cond ((match-beginning 4) 'warning) ((match-beginning 5) 'info) (t 'error)))
+              found))
+      (should (equal (nreverse found)
+                     '(("Demo/Bad.lean" "1" 16 error)
+                       ("Demo/Bad.lean" "3" 42 error)
+                       ("Demo/Other.lean" "6" 9 warning)
+                       ("Demo/Bad.lean" "6" 1 info)))))))
+
+(ert-deftest kitty-lean-dependencies-are-read-only ()
+  (should (kitty-lean-read-only-p "/p/.lake/packages/mathlib/Mathlib/Data/Nat.lean"))
+  (should (kitty-lean-read-only-p "/home/d/.elan/toolchains/leanprover--lean4---v4.35.0/src/lean/Init.lean"))
+  (should-not (kitty-lean-read-only-p "/p/Demo/Basic.lean"))
+  (should-not (kitty-lean-read-only-p nil)))
+
+(ert-deftest kitty-lean-babel-output-loses-the-temporary-file-name ()
+  (should (equal (kitty-lean--strip-locations "/t/Block1.lean:1:0: error: oops\n2\n" "/t/Block1.lean")
+                 "1:0: error: oops\n2\n")))
+
+(ert-deftest kitty-lean-infoview-drops-stale-answers ()
+  "Answers for an older request never overwrite a newer one, whatever their order;
+a failed answer leaves the infoview as it was."
+  (let* ((calls nil)
+         (rendered nil)
+         (buf (generate-new-buffer "x.lean")))
+    (cl-letf (((symbol-function 'kitty-lean--infoview-window) (lambda () t))
+              ((symbol-function 'eglot-managed-p) (lambda () t))
+              ((symbol-function 'kitty-lean--refresh-target) (lambda (b) (with-current-buffer b (point))))
+              ((symbol-function 'kitty-lean--ask-goals) (lambda (_b pos cb) (push (list :goals pos cb) calls)))
+              ((symbol-function 'kitty-lean--ask-term) (lambda (_b pos cb) (push (list :term pos cb) calls)))
+              ((symbol-function 'kitty-lean--ask-messages) (lambda (_b pos cb) (push (list :messages pos cb) calls)))
+              ((symbol-function 'kitty-lean--render)
+               (lambda (_b pos parts) (push (cons pos (plist-get parts :goals)) rendered))))
+      (with-current-buffer buf
+        (insert "theorem t : True := by\n  trivial\n")
+        (setq major-mode 'nael-mode)
+        (put 'nael-mode 'derived-mode-parent 'prog-mode)
+        (goto-char 5)
+        (kitty-lean-infoview-refresh buf)
+        (goto-char 20)
+        (kitty-lean-infoview-refresh buf)
+        ;; the same place again: no new request
+        (kitty-lean-infoview-refresh buf)
+        (should (= 6 (length calls)))
+        (cl-flet ((answer (pos &optional fail)
+                    (dolist (c calls)
+                      (when (= (nth 1 c) pos)
+                        (funcall (nth 2 c) (if fail (cons nil nil) (cons t (list (format "goal at %d" pos)))))))))
+          ;; the newer request is answered first, the older one after it
+          (answer 20)
+          (answer 5))
+        (should (equal rendered '((20 "goal at 20"))))
+        ;; forced (Lean finished the file): asked again; this time it fails
+        (setq calls nil)
+        (kitty-lean-infoview-refresh buf t)
+        (should (= 3 (length calls)))
+        (dolist (c calls) (funcall (nth 2 c) (cons nil nil)))
+        (should (= 1 (length rendered)))))
+    (kill-buffer buf)))
+
+;;;; Through the whole configuration and a real Lean server
+
+(defvar kitty-lean-test--booted nil)
+
+(defun kitty-lean-test--boot ()
+  (unless kitty-lean-test--booted
+    (setq kitty-lean-test--booted t)
+    (let ((home (make-temp-file "kitty-home" t)))
+      (setenv "KITTYMAX_PACKAGES" "none")
+      (setenv "XDG_DATA_HOME" (expand-file-name "data" home))
+      (setenv "XDG_CACHE_HOME" (expand-file-name "cache" home))
+      (setq treesit-auto-install-grammar 'never)
+      (setq user-emacs-directory (file-name-as-directory kitty-lean-test--root))
+      (load (expand-file-name "early-init.el" kitty-lean-test--root) nil t)
+      (load (expand-file-name "init.el" kitty-lean-test--root) nil t)
+      (run-hooks 'after-init-hook 'emacs-startup-hook 'window-setup-hook)
+      (when (fboundp 'kitty--evil-setup) (unless (featurep 'evil) (kitty--evil-setup)))
+      (setq kitty-lean-infoview-auto-open t))))
+
+(defun kitty-lean-test--skip-unless-lean ()
+  "Skip the test without nael or a Lean toolchain."
+  (unless (and (executable-find "lake") (executable-find "lean") (locate-library "nael"))
+    (signal 'ert-test-skipped '("no nael, lean or lake"))))
+
+(defun kitty-lean-test--write (dir file text)
+  (let ((path (expand-file-name file dir)))
+    (make-directory (file-name-directory path) t)
+    (with-temp-file path (insert text))
+    path))
+
+(defvar kitty-lean-test--project nil)
+
+(defun kitty-lean-test--project ()
+  "A Lake project: a library with an error and an unfinished proof, a good module, main."
+  (or kitty-lean-test--project
+      (let ((dir (file-name-as-directory (file-truename (make-temp-file "kitty-lean" t)))))
+        (kitty-lean-test--write dir "lakefile.toml" "name = \"demo\"\n\n[[lean_lib]]\nname = \"Demo\"\n")
+        (kitty-lean-test--write dir "Demo.lean" "import Demo.Bad\n")
+        (kitty-lean-test--write dir "Demo/Bad.lean"
+                                "def x : Nat := \"s\"\n\ntheorem t (a b : Nat) : a + b = b + a := by\n  skip\n\n#eval 1 + 1\n")
+        (kitty-lean-test--write dir "Demo/Good.lean" "def good : Nat := 42\n")
+        (kitty-lean-test--write dir "Main.lean" "def main : IO Unit := IO.println \"hello from lean\"\n")
+        (kitty-lean-test--write dir "Try.lean" "example (a b : Nat) : a + b = b + a := by\n  exact?\n")
+        (kitty-lean-test--write dir "Use.lean" "import Demo.Good\n#check good\ntheorem t (a b : Nat) : a + b = b + a := Nat.add_c\n")
+        (let ((default-directory dir))
+          (call-process "git" nil nil nil "init" "-q")
+          ;; Demo.Good's .olean, for `import Demo.Good' from org
+          (call-process "lake" nil nil nil "build" "Demo.Good"))
+        (setq kitty-lean-test--project dir))))
+
+(defun kitty-lean-test--wait (seconds pred)
+  "Wait up to SECONDS for PRED, letting timers and the server run."
+  (let ((end (+ (float-time) seconds)))
+    (while (and (not (funcall pred)) (< (float-time) end))
+      (accept-process-output nil 0.1)
+      (when (input-pending-p) (discard-input)))
+    (funcall pred)))
+
+(defun kitty-lean-test--sync ()
+  "Send the edits to the server now (eglot waits for an idle time, which batch Emacs never has)."
+  (when (eglot-managed-p) (eglot--signal-textDocument/didChange)))
+
+(defun kitty-lean-test--infoview-text ()
+  (with-current-buffer (get-buffer-create kitty-lean-infoview-buffer-name)
+    (buffer-substring-no-properties (point-min) (point-max))))
+
+(defun kitty-lean-test--infoview-shows (seconds regexp)
+  "Wait up to SECONDS for the infoview to match REGEXP; say what it shows if not."
+  (or (kitty-lean-test--wait seconds (lambda () (string-match-p regexp (kitty-lean-test--infoview-text))))
+      (progn (message "infoview, not matching %S (gen %s, paused %s):\n%s"
+                      regexp kitty-lean--gen kitty-lean--paused (kitty-lean-test--infoview-text))
+             nil)))
+
+(defun kitty-lean-test--visit (file)
+  (let ((buf (find-file-noselect (expand-file-name file (kitty-lean-test--project)))))
+    (switch-to-buffer buf)
+    (delete-other-windows)
+    (when (fboundp 'evil-normal-state) (evil-normal-state))
+    ;; eglot-ensure connects after the next command
+    (run-hooks 'post-command-hook)
+    ;; flymake starts once the buffer is on display, which batch Emacs,
+    ;; without redisplay, never says
+    (run-hooks 'window-configuration-change-hook)
+    buf))
+
+(defun kitty-lean-test--fresh ()
+  "No Lean buffer and no infoview left from an earlier test."
+  (dolist (b (buffer-list))
+    (when (and (buffer-live-p b) (with-current-buffer b (derived-mode-p 'nael-mode)))
+      (with-current-buffer b (set-buffer-modified-p nil))
+      (kill-buffer b)))
+  (when-let* ((w (kitty-lean--infoview-window))) (delete-window w)))
+
+(defun kitty-lean-test--errors (buf)
+  (with-current-buffer buf
+    (and (bound-and-true-p flymake-mode)
+         (cl-remove-if-not (lambda (d) (memq (flymake-diagnostic-type d) '(:error eglot-error)))
+                           (flymake-diagnostics)))))
+
+(ert-deftest kitty-lean-server-diagnostics-and-infoview ()
+  "A Lean file: the server, its diagnostics, the infoview following the cursor."
+  (kitty-lean-test--skip-unless-lean)
+  (kitty-lean-test--boot)
+  (kitty-lean-test--fresh)
+  (let ((buf (kitty-lean-test--visit "Demo/Bad.lean")))
+    (should (eq major-mode 'nael-mode))
+    (should abbrev-mode)
+    (should (kitty-lean-test--wait 60 (lambda () (eglot-managed-p))))
+    (should (string-match-p "lake" (format "%s" (process-command (jsonrpc--process (eglot-current-server))))))
+    (should (equal (file-truename (project-root (eglot--project (eglot-current-server))))
+                   (kitty-lean-test--project)))
+    ;; the type error and the unsolved goal
+    (should (kitty-lean-test--wait 120 (lambda () (>= (length (kitty-lean-test--errors buf)) 2))))
+    (should (kitty-lean-test--wait 60 (lambda () (not (kitty-lean-busy-p buf)))))
+    (should-not (kitty-lean--mode-line))
+    ;; the infoview opened by itself and follows the cursor
+    (should (kitty-lean--infoview-window))
+    (goto-char (point-min)) (forward-line 3) (back-to-indentation)
+    (kitty-lean-infoview-refresh buf)
+    (should (kitty-lean-test--infoview-shows 30 "⊢ a \\+ b = b \\+ a"))
+    (should (string-match-p "Tactic state" (kitty-lean-test--infoview-text)))
+    ;; messages of the cursor's line, whole
+    (goto-char (point-min)) (forward-char 16)
+    (kitty-lean-infoview-refresh buf)
+    (should (kitty-lean-test--infoview-shows 30 "Type mismatch\\(.\\|\n\\)*has type"))
+    (should (string-match-p "Messages (1)\n1:15 error" (kitty-lean-test--infoview-text)))
+    ;; a message spanning lines shows on each of them, as in VS Code
+    (goto-char (point-min)) (forward-line 3) (back-to-indentation)
+    (kitty-lean-infoview-refresh buf)
+    (should (kitty-lean-test--infoview-shows 30 "3:41 error\nunsolved goals"))
+    (should (string-match-p "All messages: 2 errors, 0 warnings, 1 info" (kitty-lean-test--infoview-text)))
+    ;; #eval's output is a message, as in VS Code's infoview
+    (goto-char (point-min)) (forward-line 5)
+    (kitty-lean-infoview-refresh buf)
+    (should (kitty-lean-test--infoview-shows 30 "6:0 info\n2$"))
+    ;; eldoc's idle timer moves it, nothing on each key
+    (goto-char (point-min)) (forward-line 3) (end-of-line)
+    (let ((gen kitty-lean--gen))
+      (eldoc-print-current-symbol-info)
+      (should (> kitty-lean--gen gen)))
+    (should (kitty-lean-test--infoview-shows 30 "⊢ a \\+ b = b \\+ a"))
+    ;; \i closes it, \i opens it
+    (kitty-lean-infoview-toggle)
+    (should-not (kitty-lean--infoview-window))
+    (kitty-lean-infoview-toggle)
+    (should (kitty-lean--infoview-window))))
+
+(ert-deftest kitty-lean-progress-while-checking ()
+  "Lean's file progress: the mode line and the fringe while checking, nothing after."
+  (kitty-lean-test--skip-unless-lean)
+  (kitty-lean-test--boot)
+  (let ((buf (kitty-lean-test--visit "Demo/Bad.lean")))
+    (should (kitty-lean-test--wait 60 (lambda () (eglot-managed-p))))
+    (kitty-lean-infoview-open)
+    ;; a report as Lean sends it, then the one that says it is done
+    (kitty-lean--on-progress (plist-get (eglot--TextDocumentIdentifier) :uri)
+                             (vector (list :range (list :start (list :line 2 :character 0) :end (list :line 5 :character 0)) :kind 1)))
+    (should (kitty-lean-busy-p buf))
+    (should (string-match-p "⧗" (kitty-lean--mode-line)))
+    (should (kitty-lean-test--wait 2 (lambda () (= 1 (length kitty-lean--progress-overlays)))))
+    (let ((gen kitty-lean--gen))
+      (kitty-lean--on-progress (plist-get (eglot--TextDocumentIdentifier) :uri) [])
+      (should-not (kitty-lean-busy-p buf))
+      ;; done: the infoview asks again
+      (should (> kitty-lean--gen gen)))
+    (should (kitty-lean-test--wait 2 (lambda () (null kitty-lean--progress-overlays))))))
+
+(ert-deftest kitty-lean-background-files-leave-the-infoview-alone ()
+  "A file Lean checks out of sight (a definition you looked at) does not take
+the infoview from the one you are in, as in VS Code."
+  (kitty-lean-test--skip-unless-lean)
+  (kitty-lean-test--boot)
+  (let ((other (kitty-lean-test--visit "Demo/Good.lean"))
+        (buf (kitty-lean-test--visit "Demo/Bad.lean")))
+    (should (kitty-lean-test--wait 60 (lambda () (with-current-buffer other (eglot-managed-p)))))
+    (should (kitty-lean-test--wait 60 (lambda () (eglot-managed-p))))
+    (kitty-lean-infoview-open)
+    (goto-char (point-min)) (forward-line 3) (back-to-indentation)
+    (kitty-lean-infoview-refresh buf t)
+    (should (kitty-lean-test--infoview-shows 30 "⊢ a \\+ b = b \\+ a"))
+    (let ((gen kitty-lean--gen))
+      ;; both opened before the server was up: one server for the two
+      (should (with-current-buffer other (eglot-managed-p)))
+      (should (eq (with-current-buffer other (eglot-current-server)) (eglot-current-server)))
+      ;; Good.lean finishes checking and gets diagnostics, out of sight
+      (with-current-buffer other
+        (let ((uri (plist-get (eglot--TextDocumentIdentifier) :uri)))
+          (kitty-lean--on-progress uri (vector (list :range (list :start (list :line 0 :character 0) :end (list :line 1 :character 0)) :kind 1)))
+          (kitty-lean--on-progress uri []))
+        (kitty-lean--after-diagnostics))
+      (should (eq kitty-lean--source buf))
+      (should (= gen kitty-lean--gen))
+      ;; the one in the selected window still does
+      (kitty-lean--after-diagnostics)
+      (should (> kitty-lean--gen gen)))))
+
+(ert-deftest kitty-lean-unicode-input ()
+  "\\a then a space → α, \\N then Escape → ℕ, \\<> → ⟨⟩ with the cursor inside, \\forall at once."
+  (kitty-lean-test--skip-unless-lean)
+  (kitty-lean-test--boot)
+  (let ((buf (kitty-lean-test--visit "Demo/Bad.lean")))
+    (goto-char (point-max))
+    (execute-kbd-macro (kbd "o - - SPC \\ a SPC x SPC \\ N <escape>"))
+    (should (equal (buffer-substring-no-properties (line-beginning-position) (line-end-position)) "-- α x ℕ"))
+    ;; \\<> puts the cursor between ⟨ and ⟩; \\< alone is ⟨, once x shows it is not \\<=
+    (execute-kbd-macro (kbd "o \\ < > x <escape> o \\ < x"))
+    (should (equal (buffer-substring-no-properties (line-beginning-position 0) (line-end-position)) "⟨x⟩\n⟨x"))
+    (execute-kbd-macro (kbd "<escape>"))
+    ;; complete and the start of nothing longer: at once, as VS Code
+    (execute-kbd-macro (kbd "o \\ f o r a l l"))
+    (should (equal (buffer-substring-no-properties (line-beginning-position) (line-end-position)) "∀"))
+    (execute-kbd-macro (kbd "<escape>"))
+    (with-current-buffer buf (set-buffer-modified-p nil) (revert-buffer t t))))
+
+(ert-deftest kitty-lean-keys ()
+  "my-nvim's Lean keys: lean.nvim's on \\, SPC m m / r / c, :Lake and :LeanNew."
+  (kitty-lean-test--skip-unless-lean)
+  (kitty-lean-test--boot)
+  (kitty-lean-test--visit "Demo/Bad.lean")
+  (dolist (k '(("i" . kitty-lean-infoview-toggle) ("r" . kitty-lean-restart-file)
+               ("s" . kitty-lean-accept-suggestion) ("S" . kitty-lean-sorry-fill)
+               ("u" . kitty-lean-insert-symbol) ("l" . kitty-lean-loogle)
+               ("/" . kitty-lean-grep-library) ("f" . kitty-lean-find-library-file)
+               ("\\" . kitty-lean-describe-symbol)))
+    (let ((b (lookup-key (evil-get-auxiliary-keymap nael-mode-map 'normal) (kbd (concat "\\ " (car k))))))
+      (should (eq (cdr k) (if (consp b) (cdr b) b)))))
+  (dolist (k '(("m" . kitty-lean-build) ("r" . kitty-lean-run-file) ("c" . kitty-lean-cache-get)))
+    (let ((b (lookup-key (kitty--local-leader-map) (kbd (car k)))))
+      (should (eq (cdr k) (if (consp b) (cdr b) b)))))
+  (should (evil-ex-binding "Lake"))
+  (should (evil-ex-binding "LeanNew")))
+
+(ert-deftest kitty-lean-sorry-fill-and-suggestions ()
+  "\\S fills each goal with a sorry; \\s takes Lean's `Try this'."
+  (kitty-lean-test--skip-unless-lean)
+  (kitty-lean-test--boot)
+  (let ((buf (kitty-lean-test--visit "Demo/Bad.lean")))
+    (should (kitty-lean-test--wait 60 (lambda () (eglot-managed-p))))
+    (should (kitty-lean-test--wait 120 (lambda () (>= (length (kitty-lean-test--errors buf)) 2))))
+    (goto-char (point-min)) (forward-line 3)
+    (kitty-lean-sorry-fill)
+    (kitty-lean-test--sync)
+    (should (equal (buffer-substring-no-properties (line-beginning-position) (line-end-position)) "  sorry"))
+    ;; the unsolved goal is gone, only the type error is left
+    (should (kitty-lean-test--wait 120 (lambda () (= 1 (length (kitty-lean-test--errors buf))))))
+    (with-current-buffer buf (revert-buffer t t)))
+  (let ((buf (kitty-lean-test--visit "Try.lean")))
+    (should (kitty-lean-test--wait 60 (lambda () (eglot-managed-p))))
+    (should (kitty-lean-test--wait 120 (lambda () (and (not (kitty-lean-busy-p buf)) (flymake-diagnostics)))))
+    (goto-char (point-min)) (forward-line 1) (back-to-indentation)
+    (kitty-lean-accept-suggestion)
+    (should (kitty-lean-test--wait 10 (lambda () (not (string-match-p "exact\\?" (buffer-string))))))
+    (should (string-match-p "exact Nat.add_comm a b\\|exact Nat.add_comm" (buffer-string)))
+    (set-buffer-modified-p nil)
+    (kill-buffer buf)))
+
+(ert-deftest kitty-lean-language-server-basics ()
+  "What eglot gives from Lean's server: completion, definitions across modules
+and into Lean's own library (read-only), hovers, semantic highlighting."
+  (kitty-lean-test--skip-unless-lean)
+  (kitty-lean-test--boot)
+  (let ((buf (kitty-lean-test--visit "Use.lean")))
+    (should (kitty-lean-test--wait 60 (lambda () (eglot-managed-p))))
+    (should (kitty-lean-test--wait 120 (lambda () (and (not (kitty-lean-busy-p buf)) (flymake-diagnostics)))))
+    ;; completion at `Nat.add_c|'
+    (goto-char (point-min)) (forward-line 2) (end-of-line)
+    (let* ((capf (eglot-completion-at-point))
+           (cands (all-completions (buffer-substring-no-properties (nth 0 capf) (nth 1 capf)) (nth 2 capf))))
+      (should (member "add_comm" (mapcar (lambda (c) (car (last (split-string c "\\.")))) cands))))
+    ;; hover on `good': its type
+    (goto-char (point-min)) (forward-line 1) (search-forward "goo")
+    (let ((hover (jsonrpc-request (eglot-current-server) :textDocument/hover (eglot--TextDocumentPositionParams))))
+      (should (string-match-p "Nat" (format "%S" hover))))
+    (require 'consult-xref nil t)      ; what kittymax shows xrefs with (package autoloads)
+    ;; go to definition: another module of the project
+    (xref-find-definitions "good")
+    (should (string-suffix-p "Demo/Good.lean" buffer-file-name))
+    (should (looking-at "good\\|def good"))
+    (kill-buffer)
+    ;; and Lean's own library, which is not for editing
+    (switch-to-buffer buf)
+    (goto-char (point-min)) (forward-line 2) (search-forward ": Nat") (backward-char 1)
+    (call-interactively #'xref-find-definitions)
+    (should (string-match-p "Prelude\\.lean\\'\\|/Init/" buffer-file-name))
+    (should buffer-read-only)
+    (switch-to-buffer buf)
+    (should (bound-and-true-p eglot-semantic-tokens-mode))))
+
+(ert-deftest kitty-lean-closing-the-last-file-is-quiet ()
+  "Closing the last Lean file stops its server, without an error (Lean exits
+before eglot's `exit' reaches it, some of the time: so, ten times)."
+  (kitty-lean-test--skip-unless-lean)
+  (kitty-lean-test--boot)
+  (kitty-lean-test--fresh)
+  (dotimes (_ 10)
+    (let* ((buf (kitty-lean-test--visit "Demo/Good.lean"))
+           (server (and (kitty-lean-test--wait 60 (lambda () (eglot-managed-p)))
+                        (eglot-current-server))))
+      (should server)
+      (kill-buffer buf)
+      (should-not (buffer-live-p buf))
+      (should (kitty-lean-test--wait 10 (lambda () (not (jsonrpc-running-p server))))))))
+
+(ert-deftest kitty-lean-restart-file-checks-again ()
+  (kitty-lean-test--skip-unless-lean)
+  (kitty-lean-test--boot)
+  (let ((buf (kitty-lean-test--visit "Demo/Bad.lean")))
+    (should (kitty-lean-test--wait 60 (lambda () (eglot-managed-p))))
+    (should (kitty-lean-test--wait 120 (lambda () (>= (length (kitty-lean-test--errors buf)) 2))))
+    (kitty-lean-restart-file)
+    (should (kitty-lean-test--wait 120 (lambda () (>= (length (kitty-lean-test--errors buf)) 2))))))
+
+(ert-deftest kitty-lean-lake-build-and-run ()
+  "SPC m m: lake build, its errors as jumps; SPC m r: main's output."
+  (kitty-lean-test--skip-unless-lean)
+  (kitty-lean-test--boot)
+  (kitty-lean-test--visit "Demo/Bad.lean")
+  (let ((done nil))
+    (let ((compilation-finish-functions (list (lambda (&rest _) (setq done t))))
+          (compilation-ask-about-save nil))
+      (kitty-lean-build "Demo")
+      (should (kitty-lean-test--wait 180 (lambda () done))))
+    (with-current-buffer "*compilation*"
+      (goto-char (point-min))
+      (let ((msg (compilation-next-error 1)))
+        (should msg)
+        (should (string-suffix-p "Demo/Bad.lean" (caar (compilation--loc->file-struct (compilation--message->loc msg)))))
+        (should (= 1 (compilation--loc->line (compilation--message->loc msg)))))
+      ;; RET lands where Lean points: column 15 (0-based), on "s"
+      (compile-goto-error)
+      (should (string-suffix-p "Demo/Bad.lean" buffer-file-name))
+      (should (= 1 (line-number-at-pos)))
+      (should (= 15 (current-column)))))
+  (kitty-lean-test--visit "Main.lean")
+  (let ((done nil))
+    (let ((compilation-finish-functions (list (lambda (&rest _) (setq done t))))
+          (compilation-ask-about-save nil))
+      (kitty-lean-run-file)
+      (should (kitty-lean-test--wait 120 (lambda () done))))
+    (should (string-match-p "hello from lean"
+                            (with-current-buffer (seq-find (lambda (b) (string-match-p "compilation" (buffer-name b))) (buffer-list))
+                              (buffer-string))))))
+
+(ert-deftest kitty-lean-org-babel ()
+  "A lean block in org: #eval and #check come back; :project brings the project's modules."
+  (kitty-lean-test--skip-unless-lean)
+  (kitty-lean-test--boot)
+  (require 'org)
+  (require 'ob-core)
+  (let ((org-file (expand-file-name "notes.org" (make-temp-file "kitty-org" t))))
+    (with-current-buffer (find-file-noselect org-file)
+      (insert "#+begin_src lean\n#eval 1 + 1\n#check Nat.add_comm\n#+end_src\n\n"
+              (format "#+begin_src lean :project %s\nimport Demo.Good\n#eval good\n#+end_src\n" (kitty-lean-test--project)))
+      (goto-char (point-min))
+      (should (equal (org-babel-execute-src-block nil nil '((:results . "output silent")))
+                     "2\nNat.add_comm (n m : Nat) : n + m = m + n"))
+      (re-search-forward "import Demo.Good")
+      (should (equal (org-babel-execute-src-block nil nil '((:results . "output silent"))) "42"))
+      ;; the scratch files are gone again
+      (should-not (directory-files (expand-file-name ".lake/kittymax-org" (kitty-lean-test--project)) nil "\\.lean\\'"))
+      (set-buffer-modified-p nil)
+      (kill-buffer))))
+
+(ert-deftest kitty-lean-org-edit-has-the-server ()
+  "C-c ' on a lean block: nael, the server, goals in the infoview; back without questions."
+  (kitty-lean-test--skip-unless-lean)
+  (kitty-lean-test--boot)
+  (require 'org)
+  (let ((org-file (expand-file-name "notes.org" (make-temp-file "kitty-org" t)))
+        (project-server (with-current-buffer (kitty-lean-test--visit "Demo/Good.lean")
+                          (and (kitty-lean-test--wait 60 (lambda () (eglot-managed-p)))
+                               (eglot-current-server)))))
+    (should project-server)
+    (with-current-buffer (find-file-noselect org-file)
+      (switch-to-buffer (current-buffer))
+      (insert (format "* Proof\n#+begin_src lean :project %s\nimport Demo.Good\ntheorem g : good = 42 := by\n  skip\n#+end_src\n"
+                      (kitty-lean-test--project)))
+      (goto-char (point-min))
+      (re-search-forward "  skip")
+      (org-edit-special)
+      (run-hooks 'post-command-hook)
+      (let ((edit (current-buffer)))
+        (should (eq major-mode 'nael-mode))
+        (should (string-prefix-p (expand-file-name ".lake/kittymax-org/" (kitty-lean-test--project)) buffer-file-name))
+        (should (kitty-lean-test--wait 60 (lambda () (eglot-managed-p))))
+        (should (equal (file-truename (project-root (eglot--project (eglot-current-server))))
+                       (kitty-lean-test--project)))
+        ;; the project's server, not a second one, when it is running already
+        (when project-server (should (eq project-server (eglot-current-server))))
+        (should (kitty-lean-test--wait 120 (lambda () (kitty-lean-test--errors edit))))
+        (goto-char (point-min)) (forward-line 2) (back-to-indentation)
+        (unless (kitty-lean--infoview-window) (kitty-lean-infoview-open))
+        (kitty-lean-infoview-refresh edit t)
+        (should (kitty-lean-test--infoview-shows 30 "⊢ good = 42"))
+        (let ((file buffer-file-name)
+              (server (eglot-current-server)))
+          (goto-char (point-max))
+          (insert "-- edited")
+          ;; no question, the block takes the edit, the scratch file goes
+          (cl-letf (((symbol-function 'yes-or-no-p) (lambda (&rest _) (error "asked")))
+                    ((symbol-function 'y-or-n-p) (lambda (&rest _) (error "asked"))))
+            (org-edit-src-exit))
+          (should-not (buffer-live-p edit))
+          (should-not (file-exists-p file))
+          (should (string-match-p "-- edited" (buffer-string)))
+          ;; Good.lean still has the server
+          (should (jsonrpc-running-p server))
+          ;; with nothing else open, the block's server stops after C-c '
+          (dolist (b (buffer-list))
+            (when (and (buffer-live-p b) (with-current-buffer b (derived-mode-p 'nael-mode)))
+              (kill-buffer b)))
+          (goto-char (point-min)) (re-search-forward "  skip")
+          (org-edit-special)
+          (run-hooks 'post-command-hook)
+          (should (kitty-lean-test--wait 60 (lambda () (eglot-managed-p))))
+          (let ((alone (eglot-current-server)))
+            (should-not (eq alone server))
+            (org-edit-src-exit)
+            (should (kitty-lean-test--wait 10 (lambda () (not (jsonrpc-running-p alone)))))))
+        (set-buffer-modified-p nil)
+        (kill-buffer)))))
+
+(ert-deftest kitty-lean-org-blocks-take-abbreviations ()
+  "\\to in a lean block of an org file is →; in the prose it stays LaTeX."
+  (kitty-lean-test--skip-unless-lean)
+  (kitty-lean-test--boot)
+  (with-current-buffer (find-file-noselect (expand-file-name "n.org" (make-temp-file "kitty-org" t)))
+    (switch-to-buffer (current-buffer))
+    (insert "#+begin_src lean\n\n#+end_src\n")
+    (goto-char (point-min)) (forward-line 1)
+    (evil-insert-state)
+    (execute-kbd-macro (kbd "a SPC \\ t o SPC b"))
+    (evil-normal-state)
+    (should (equal (buffer-substring-no-properties (line-beginning-position) (line-end-position)) "a → b"))
+    (goto-char (point-max))
+    (evil-insert-state)
+    (execute-kbd-macro (kbd "f SPC \\ t o SPC g"))
+    (evil-normal-state)
+    (should (equal (buffer-substring-no-properties (line-beginning-position) (line-end-position)) "f \\to g"))
+    (set-buffer-modified-p nil)
+    (kill-buffer)))
+
+(provide 'kitty-lean-test)
+;;; kitty-lean-test.el ends here
