@@ -101,6 +101,7 @@ const groups = [
 let menu = null
 const closeMenu = () => { menu?.remove(); menu = null }
 addEventListener('contextmenu', e => {
+    if (menu?.contains(e.target)) return e.preventDefault()
     const ctx = {}
     for (let el = e.target; el instanceof Element; el = el.parentElement)
         for (const [k, v] of Object.entries(JSON.parse(el.getAttribute('data-vscode-context') || '{}')))
@@ -128,7 +129,13 @@ addEventListener('contextmenu', e => {
     menu.style.left = Math.max(0, Math.min(e.clientX, innerWidth - menu.offsetWidth)) + 'px'
     menu.style.top = Math.max(0, Math.min(e.clientY, innerHeight - menu.offsetHeight)) + 'px'
 })
-addEventListener('mousedown', e => { if (menu && !menu.contains(e.target)) closeMenu() })
+// a click outside only closes it, as a menu does: it reaches nothing under it
+for (const type of ['pointerdown', 'mousedown', 'click'])
+    addEventListener(type, e => {
+        if (!menu || menu.contains(e.target) || e.button === 2) return
+        e.stopPropagation(); e.preventDefault()
+        if (type === 'click') closeMenu()
+    }, true)
 addEventListener('keydown', e => { if (e.key === 'Escape') closeMenu() })
 addEventListener('blur', closeMenu)
-addEventListener('scroll', closeMenu, true)
+addEventListener('scroll', e => { if (!menu?.contains(e.target)) closeMenu() }, true)

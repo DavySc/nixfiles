@@ -1713,7 +1713,7 @@ as in VS Code; ranges follow edits."
   (kitty-lean-test--boot)
   (let ((buf (kitty-lean-test--visit "Fold.lean")))
     (should (kitty-lean-test--wait 60 (lambda () (eglot-managed-p))))
-    (should (kitty-lean-test--wait 60 (lambda () kitty-lean--fold-ranges)))
+    (should (kitty-lean-test--wait 60 (lambda () (> (length kitty-lean--fold-ranges) 0))))
     (should hs-minor-mode)
     (should (equal (mapcar (lambda (r) (list (line-number-at-pos (car r)) (line-number-at-pos (nth 1 r))))
                            kitty-lean--fold-ranges)
@@ -1746,9 +1746,8 @@ as in VS Code; ranges follow edits."
     (set-buffer-modified-p nil)))
 
 (ert-deftest kitty-lean-fold-proofs ()
-  "Lean 4.37's proof ranges: fold all proofs, unfold them, fold them on open
-but the one at point (VS Code's foldProofsByDefault); an answer for an older
-text is dropped."
+  "Lean 4.37's proof ranges: fold all proofs, unfold them; an answer for
+an older text is dropped."
   (with-temp-buffer
     (insert kitty-lean-test--fold-source)
     (kitty-lean--fold-setup)
@@ -1769,24 +1768,37 @@ text is dropped."
         (kitty-lean--fold-request)
         (goto-char (point-max)) (insert "\n")
         (funcall success answer)
-        (should-not kitty-lean--fold-ranges)
+        (should (equal kitty-lean--fold-ranges []))
         (delete-char -1)
-        ;; on open, with foldProofsByDefault: every proof but the one at point
-        (let ((kitty-lean-fold-proofs-by-default t))
-          (goto-char (point-min)) (forward-line 6)
-          (kitty-lean--fold-request)
-          (funcall success answer)
-          (should-not (kitty-lean-test--hidden-lines))
-          (goto-char (point-min))
-          (kitty-lean-unfold-proofs)
-          (kitty-lean-fold-proofs)
-          (should (equal (kitty-lean-test--hidden-lines) '(5 6 7 8)))
-          (kitty-lean-unfold-proofs)
-          (should-not (kitty-lean-test--hidden-lines))
-          ;; a second answer folds nothing by itself
-          (kitty-lean--fold-request)
-          (funcall success answer)
-          (should-not (kitty-lean-test--hidden-lines)))))))
+        (kitty-lean--fold-request)
+        (funcall success answer)
+        (should (equal (mapcar (lambda (r) (list (line-number-at-pos (car r)) (line-number-at-pos (nth 1 r)) (nth 2 r)))
+                               kitty-lean--fold-ranges)
+                       '((1 2 nil) (4 8 t) (10 14 nil) (11 13 nil))))
+        (kitty-lean-fold-proofs)
+        (should (equal (kitty-lean-test--hidden-lines) '(5 6 7 8)))
+        (kitty-lean-unfold-proofs)
+        (should-not (kitty-lean-test--hidden-lines))))))
+
+(ert-deftest kitty-lean-folding-is-cheap ()
+  "Taking 6000 ranges and folding the top level of 2000 declarations stay
+well under a second (the review measured 6.8 s and 15 s before)."
+  (with-temp-buffer
+    (dotimes (i 2000) (insert (format "def d%d : Nat :=\n  %d\n\n" i i)))
+    (setq-local comment-start "-- " comment-end "")
+    (kitty-lean--fold-setup)
+    (should hs-minor-mode)
+    (let ((answer (vconcat (cl-loop for i below 2000 for l = (* 3 i)
+                                    append (list (list :startLine l :endLine (1+ l) :kind "region")
+                                                 (list :startLine l :endLine (1+ l) :kind "proof")
+                                                 (list :startLine (1+ l) :endLine (+ 2 l) :kind "region")))))
+          (start (float-time)))
+      (kitty-lean--folding-ranges answer)
+      (should (< (- (float-time) start) 0.5))
+      (setq start (float-time))
+      (hs-hide-all)
+      (should (< (- (float-time) start) 1.0))
+      (should (= 2000 (length (kitty-lean-test--hidden-lines)))))))
 
 ;;;; The webview's right-click menu
 

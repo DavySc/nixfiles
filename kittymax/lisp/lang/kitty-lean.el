@@ -509,16 +509,10 @@ An element, not a symbol: a list that starts with a symbol is a conditional.
 ;; to an older text than the buffer's is dropped (the next check asks
 ;; again).  test/kitty_lean_folding.tla is its model.
 
-(defcustom kitty-lean-fold-proofs-by-default nil
-  "Fold every proof but the one at point when a Lean file opens.
-VS Code's lean4.foldProofsByDefault; needs Lean 4.37 or newer."
-  :type 'boolean)
-
-(defvar-local kitty-lean--fold-ranges nil
-  "Lean's folding ranges, outermost first: (START END PROOF-P).
+(defvar-local kitty-lean--fold-ranges []
+  "Lean's folding ranges, by start, outermost first: [(START END PROOF-P) ...].
 START is a marker at the start of the first line, END at the end of the last.")
 (defvar-local kitty-lean--fold-tick nil "The text (chars-modified-tick) Lean's ranges are for.")
-(defvar-local kitty-lean--fold-default-done nil)
 
 (defun kitty-lean--fold-request ()
   "Ask Lean for this buffer's folding ranges."
@@ -537,29 +531,48 @@ START is a marker at the start of the first line, END at the end of the last.")
 
 (defun kitty-lean--folding-ranges (ranges)
   "Take Lean's folding RANGES (a vector) for this buffer."
-  (dolist (r kitty-lean--fold-ranges)
+  (seq-doseq (r kitty-lean--fold-ranges)
     (set-marker (nth 0 r) nil) (set-marker (nth 1 r) nil))
-  (save-excursion
-    (save-restriction
-      (widen)
-      (cl-flet ((at (line f) (goto-char (point-min)) (forward-line line) (copy-marker (funcall f) t)))
+  (let ((bol (make-hash-table)) (here 0))
+    ;; one pass down the buffer, however many ranges
+    (save-excursion
+      (save-restriction
+        (widen)
+        (goto-char (point-min))
+        (dolist (line (sort (delete-dups (seq-mapcat (lambda (r) (list (plist-get r :startLine)
+                                                                       (plist-get r :endLine)))
+                                                     ranges))
+                            #'<))
+          (forward-line (- line here))
+          (setq here line)
+          (puthash line (point) bol))
         (setq kitty-lean--fold-ranges
-              (sort (mapcar (lambda (r)
-                              (list (at (plist-get r :startLine) #'pos-bol)
-                                    (at (plist-get r :endLine) #'pos-eol)
-                                    (equal (plist-get r :kind) "proof")))
-                            ranges)
-                    (lambda (a b) (or (< (car a) (car b))
-                                      (and (= (car a) (car b)) (> (cadr a) (cadr b))))))))))
-  (when (and kitty-lean-fold-proofs-by-default (not kitty-lean--fold-default-done)
-             (seq-some #'caddr kitty-lean--fold-ranges))
-    (setq kitty-lean--fold-default-done t)
-    (kitty-lean--fold-proofs t (point))))
+              (vconcat
+               (sort (mapcar (lambda (r)
+                               (list (copy-marker (gethash (plist-get r :startLine) bol) t)
+                                     (copy-marker (progn (goto-char (gethash (plist-get r :endLine) bol))
+                                                         (pos-eol))
+                                                  t)
+                                     (equal (plist-get r :kind) "proof")))
+                             ranges)
+                     (lambda (a b) (or (< (car a) (car b))
+                                       (and (= (car a) (car b)) (> (cadr a) (cadr b))))))))))))
 
 ;; hideshow's questions, answered from the ranges
 
+(defun kitty-lean--fold-from (pos)
+  "The index of the first range starting at POS or after it."
+  (let ((lo 0) (hi (length kitty-lean--fold-ranges)))
+    (while (< lo hi)
+      (let ((mid (/ (+ lo hi) 2)))
+        (if (< (car (aref kitty-lean--fold-ranges mid)) pos) (setq lo (1+ mid)) (setq hi mid))))
+    lo))
+
 (defun kitty-lean--fold-at (pos)
-  (seq-find (lambda (r) (= (car r) pos)) kitty-lean--fold-ranges))
+  (let ((i (kitty-lean--fold-from pos)))
+    (and (< i (length kitty-lean--fold-ranges))
+         (= (car (aref kitty-lean--fold-ranges i)) pos)
+         (aref kitty-lean--fold-ranges i))))
 
 (defun kitty-lean--hs-looking-at-block-start ()
   (when (kitty-lean--fold-at (point))
@@ -570,21 +583,24 @@ START is a marker at the start of the first line, END at the end of the last.")
   (goto-char (nth 1 (kitty-lean--fold-at (point)))))
 
 (defun kitty-lean--hs-find-block-beginning ()
-  (when-let* ((r (car (last (seq-filter (lambda (r) (<= (car r) (point) (nth 1 r)))
-                                         kitty-lean--fold-ranges)))))
+  (when-let* ((r (seq-find (lambda (r) (<= (car r) (point) (nth 1 r)))
+                           (reverse (seq-subseq kitty-lean--fold-ranges 0 (kitty-lean--fold-from (1+ (point))))))))
     (goto-char (car r))))
 
 (defun kitty-lean--hs-find-next-block (_regexp bound _comments)
-  (when-let* ((r (seq-find (lambda (r) (<= (point) (car r) bound)) kitty-lean--fold-ranges)))
-    (goto-char (min (1+ (car r)) (point-max)))
-    (set-match-data (list (car r) (point)))
-    t))
+  (let ((i (kitty-lean--fold-from (point))))
+    (when (and (< i (length kitty-lean--fold-ranges))
+               (<= (car (aref kitty-lean--fold-ranges i)) bound))
+      (let ((start (car (aref kitty-lean--fold-ranges i))))
+        (goto-char (min (1+ start) (point-max)))
+        (set-match-data (list start (point)))
+        t))))
 
-(defun kitty-lean--fold-proofs (fold &optional except)
-  "Fold (FOLD non-nil) or unfold every proof, but one around EXCEPT."
+(defun kitty-lean--fold-proofs (fold)
+  "Fold (FOLD non-nil) or unfold every proof."
   (save-excursion
-    (dolist (r kitty-lean--fold-ranges)
-      (when (and (nth 2 r) (not (and except (<= (car r) except (nth 1 r)))))
+    (seq-doseq (r kitty-lean--fold-ranges)
+      (when (nth 2 r)
         (goto-char (car r))
         (if fold (hs-hide-block-at-point)
           (hs-discard-overlays (car r) (nth 1 r)))))))

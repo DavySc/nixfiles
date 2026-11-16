@@ -13,7 +13,7 @@ below), `lisp/lang/kitty-lean-widgets.el` (Lean's widgets as text),
 elan from Nix to fetch each project's toolchain.
 
 Tested against Lean 4.35 and a real Lake project in `test/kitty-lean-test.el`
-(63 tests): the server, diagnostics, the infoview, progress, completion,
+(64 tests): the server, diagnostics, the infoview, progress, completion,
 definitions, hovers, `\` input, sorry, `Try this`, restart, `lake build` and
 run, and Org blocks with `C-c '`. Most of the rest are regression tests from
 two reviews that tried each feature against real Lean: K on subterms, session
@@ -51,7 +51,7 @@ versions that the reviews found.
 | Rename | `grn` / `SPC c n` | done |
 | Call hierarchy | `M-x eglot-show-call-hierarchy` (Emacs 31) | done |
 | Outline, breadcrumbs, go to symbol | `gO` / `SPC c s` (imenu), `SPC s i` all buffers | done (no breadcrumbs bar) |
-| Folding: Lean's folding ranges (declarations, namespaces, imports, comments; proofs in Lean ≥ 4.37), Fold / Unfold All Proofs, `lean4.foldProofsByDefault` | kittymax asks Lean for them (eglot does not) each time it finishes checking, and hideshow folds them: `za` `zc` `zo` `zM` `zR`; `\z` / `\Z` fold / unfold all proofs; `kitty-lean-fold-proofs-by-default` | done |
+| Folding: Lean's folding ranges (declarations, namespaces, imports, comments; proofs in Lean ≥ 4.37), Fold / Unfold All Proofs | kittymax asks Lean for them (eglot does not) each time it finishes checking, and hideshow folds them: `za` `zc` `zo` `zM` `zR`; `\z` / `\Z` fold / unfold all proofs (not `lean4.foldProofsByDefault`) | done |
 | Sticky scroll | none | gap |
 | Code actions: `#guard_msgs` update, imports for unknown identifiers, `Try this` | `gra` / `SPC c a` for all of them; `\s` takes a `Try this` at once | done |
 | Restart File (`Ctrl+Shift+X`), Restart Server | `\r` / `SPC m R` (rebuilds out-of-date imports), `\R` (also a start that hangs) | done |
