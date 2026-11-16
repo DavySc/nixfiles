@@ -5,6 +5,15 @@
 <title>Lean Infoview</title>
 <link rel="stylesheet" href="dist/index.css">
 <link rel="stylesheet" href="theme.css">
+<style>
+.kitty-menu { position: fixed; z-index: 100; display: flex; flex-direction: column; padding: 4px 0;
+  max-height: 100vh; box-sizing: border-box; overflow-y: auto;
+  background: var(--vscode-editorHoverWidget-background); color: var(--vscode-editor-foreground);
+  border: 1px solid var(--vscode-editorHoverWidget-border); box-shadow: 0 2px 8px var(--vscode-widget-shadow); }
+.kitty-menu button { all: unset; padding: 2px 16px; white-space: nowrap; cursor: default; font: inherit; }
+.kitty-menu button:hover { background: var(--vscode-editor-selectionBackground); }
+.kitty-menu hr { width: 100%; margin: 4px 0; border: 0; border-top: 1px solid var(--vscode-editorHoverWidget-border); }
+</style>
 </head>
 <body>
 <div id="react_root"></div>

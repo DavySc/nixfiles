@@ -65,3 +65,77 @@ loadRenderInfoview(imports, [editorApi, document.getElementById('react_root')], 
         else void api[msg.m](...msg.a)
     }
 })
+
+// VS Code's right-click menu on the infoview (vscode-lean4's package.json,
+// "webview/context"): the infoview marks what is under the mouse with
+// data-vscode-context, the nearest mark winning; an entry shows when its key
+// is there, and a click hands the entry and the key's id back to it.
+const item = (entry, title, key = entry + 'Id') => [key, entry, title]
+const groups = [
+    [item('goToDefinition', 'Go to Definition', 'interactiveCodeTagId'),
+        item('goToPinnedLocation', 'Go to Pinned Location'),
+        item('goToMessageLocation', 'Go to Source Location of Message'),
+        item('hideTraceSearch', 'Hide Search'), item('showTraceSearch', 'Show Search'),
+        item('select', 'Select', 'selectableLocationId'),
+        item('unselect', 'Unselect', 'unselectableLocationId'),
+        item('unselectAll', 'Unselect All', 'selectedLocationsId')],
+    [item('pin', 'Pin State to Top'), item('unpin', 'Unpin State'),
+        item('pause', 'Pause State'), item('unpause', 'Unpause State'),
+        item('refresh', 'Refresh Paused State'),
+        item('pauseAllMessages', "Pause 'All Messages'"), item('unpauseAllMessages', "Unpause 'All Messages'"),
+        item('copyState', 'Copy State'), item('copyMessage', 'Copy Message')],
+    // VS Code's "Settings…" submenu, here as the menu's last part
+    [item('displayTargetBeforeAssumptions', 'Display Target Before Assumptions'),
+        item('displayAssumptionsBeforeTarget', 'Display Assumptions Before Target'),
+        item('hideTypeAssumptions', 'Hide Type Assumptions'), item('showTypeAssumptions', 'Show Type Assumptions'),
+        item('hideInstanceAssumptions', 'Hide Instance Assumptions'),
+        item('showInstanceAssumptions', 'Show Instance Assumptions'),
+        item('hideInaccessibleAssumptions', 'Hide Inaccessible Assumptions'),
+        item('showInaccessibleAssumptions', 'Show Inaccessible Assumptions'),
+        item('hideLetValues', 'Hide Let-Values'), item('showLetValues', 'Show Let-Values'),
+        item('hideGoalNames', 'Hide Goal Names'), item('showGoalNames', 'Show Goal Names'),
+        item('emphasizeFirstGoal', 'Emphasize First Goal'), item('deemphasizeFirstGoal', 'De-Emphasize First Goal'),
+        item('saveSettings', 'Save Current Settings to Default Settings')],
+]
+
+let menu = null
+const closeMenu = () => { menu?.remove(); menu = null }
+addEventListener('contextmenu', e => {
+    if (menu?.contains(e.target)) return e.preventDefault()
+    const ctx = {}
+    for (let el = e.target; el instanceof Element; el = el.parentElement)
+        for (const [k, v] of Object.entries(JSON.parse(el.getAttribute('data-vscode-context') || '{}')))
+            if (!(k in ctx)) ctx[k] = v
+    const selected = String(getSelection())
+    const shown = [selected ? [['Copy', () => editorApi.copyToClipboard(selected)]] : [],
+        ...groups.map(g => g.filter(([key]) => ctx[key]).map(([key, entry, title]) =>
+            [title, () => window.kittyInfoview.clickedContextMenu({ entry, id: ctx[key] })]))]
+        .filter(g => g.length)
+    if (!shown.length || !window.kittyInfoview) return
+    e.preventDefault()
+    closeMenu()
+    menu = document.createElement('div')
+    menu.className = 'kitty-menu'
+    shown.forEach((g, n) => {
+        if (n) menu.append(document.createElement('hr'))
+        for (const [title, act] of g) {
+            const b = document.createElement('button')
+            b.textContent = title
+            b.onclick = () => { closeMenu(); act() }
+            menu.append(b)
+        }
+    })
+    document.body.append(menu)
+    menu.style.left = Math.max(0, Math.min(e.clientX, innerWidth - menu.offsetWidth)) + 'px'
+    menu.style.top = Math.max(0, Math.min(e.clientY, innerHeight - menu.offsetHeight)) + 'px'
+})
+// a click outside only closes it, as a menu does: it reaches nothing under it
+for (const type of ['pointerdown', 'mousedown', 'click'])
+    addEventListener(type, e => {
+        if (!menu || menu.contains(e.target) || e.button === 2) return
+        e.stopPropagation(); e.preventDefault()
+        if (type === 'click') closeMenu()
+    }, true)
+addEventListener('keydown', e => { if (e.key === 'Escape') closeMenu() })
+addEventListener('blur', closeMenu)
+addEventListener('scroll', e => { if (!menu?.contains(e.target)) closeMenu() }, true)
