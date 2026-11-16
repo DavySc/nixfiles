@@ -170,6 +170,24 @@ end ProofWidgets
 "
   "A Lean file with panel widgets: one kittymax draws, one it cannot.")
 
+(defconst kitty-lean-test--fold-source
+  "/-- A doc
+  comment -/
+theorem foo (n : Nat) :
+    n + 0 = n := by
+  induction n with
+  | zero => rfl
+  | succ n ih =>
+    simp
+
+namespace A
+def bar : Nat :=
+  let x := 1
+  x + 1
+end A
+"
+  "A Lean file with folding ranges: a doc comment, a theorem, a namespace and a def in it.")
+
 (defun kitty-lean-test--project ()
   "A Lake project: a library with an error and an unfinished proof, a good module, main."
   (or kitty-lean-test--project
@@ -186,6 +204,7 @@ end ProofWidgets
         (kitty-lean-test--write dir "Trace.lean"
                                 "set_option trace.Meta.synthInstance true in\nexample : Inhabited Nat := inferInstance\n")
         (kitty-lean-test--write dir "Widget.lean" kitty-lean-test--widget-source)
+        (kitty-lean-test--write dir "Fold.lean" kitty-lean-test--fold-source)
         (kitty-lean-test--write dir "Use.lean" "import Demo.Good\n#check good\ntheorem t (a b : Nat) : a + b = b + a := Nat.add_c\n")
         (let ((default-directory dir))
           (call-process "git" nil nil nil "init" "-q")
@@ -1672,3 +1691,121 @@ its continuation later, outside the delivery (a synchronous request waiting)."
       (funcall success nil)
       (should (equal sent '("{\"id\":5,\"k\":\"raw\",\"v\":{\"id\":42,\"result\":{}}}")))
       (should (zerop (hash-table-count kitty-lean-webview--wanted))))))
+
+;;;; Folding
+
+(defun kitty-lean-test--hidden-lines ()
+  "The 1-based lines whose text hideshow hides."
+  (let (lines)
+    (save-excursion
+      (goto-char (point-min))
+      (while (not (eobp))
+        (when (and (not (eolp)) (invisible-p (pos-bol)))
+          (push (line-number-at-pos) lines))
+        (forward-line 1)))
+    (nreverse lines)))
+
+(ert-deftest kitty-lean-folds-what-lean-says ()
+  "Lean's folding ranges through hideshow and evil: za folds the declaration
+on the line, zR opens all, zM folds the top level; the first line stays,
+as in VS Code; ranges follow edits."
+  (kitty-lean-test--skip-unless-lean)
+  (kitty-lean-test--boot)
+  (let ((buf (kitty-lean-test--visit "Fold.lean")))
+    (should (kitty-lean-test--wait 60 (lambda () (eglot-managed-p))))
+    (should (kitty-lean-test--wait 60 (lambda () kitty-lean--fold-ranges)))
+    (should hs-minor-mode)
+    (should (equal (mapcar (lambda (r) (list (line-number-at-pos (car r)) (line-number-at-pos (nth 1 r))))
+                           kitty-lean--fold-ranges)
+                   '((1 2) (3 8) (10 14) (11 13))))
+    ;; za on the theorem's first line: lines 4-8 hidden, 3 shown
+    (goto-char (point-min)) (forward-line 2) (forward-char 3)
+    (execute-kbd-macro "za")
+    (should (equal (kitty-lean-test--hidden-lines) '(4 5 6 7 8)))
+    (execute-kbd-macro "za")
+    (should-not (kitty-lean-test--hidden-lines))
+    ;; zc inside the def folds the def, not the namespace
+    (goto-char (point-min)) (forward-line 11)
+    (execute-kbd-macro "zc")
+    (should (equal (kitty-lean-test--hidden-lines) '(12 13)))
+    (execute-kbd-macro "zR")
+    (should-not (kitty-lean-test--hidden-lines))
+    ;; zM: the top level (comment, theorem, namespace)
+    (execute-kbd-macro "zM")
+    (should (equal (kitty-lean-test--hidden-lines) '(2 4 5 6 7 8 11 12 13 14)))
+    (execute-kbd-macro "zR")
+    ;; an edit above: the ranges move with the text, then Lean's new answer
+    (goto-char (point-min))
+    (insert "-- a new first line\n")
+    (should (equal (mapcar (lambda (r) (line-number-at-pos (car r))) kitty-lean--fold-ranges) '(2 4 11 12)))
+    (should-not (eql kitty-lean--fold-tick (buffer-chars-modified-tick)))
+    (kitty-lean-test--sync)
+    (should (kitty-lean-test--wait 60 (lambda () (not (kitty-lean-busy-p buf)))))
+    (should (kitty-lean-test--wait 10 (lambda () (eql kitty-lean--fold-tick (buffer-chars-modified-tick)))))
+    (should (equal (mapcar (lambda (r) (line-number-at-pos (car r))) kitty-lean--fold-ranges) '(2 4 11 12)))
+    (set-buffer-modified-p nil)))
+
+(ert-deftest kitty-lean-fold-proofs ()
+  "Lean 4.37's proof ranges: fold all proofs, unfold them, fold them on open
+but the one at point (VS Code's foldProofsByDefault); an answer for an older
+text is dropped."
+  (with-temp-buffer
+    (insert kitty-lean-test--fold-source)
+    (kitty-lean--fold-setup)
+    ;; Lean 4.37's answer for this text: the proof from the end of the header
+    (let ((answer (vector '(:startLine 0 :endLine 1 :kind "comment")
+                          '(:startLine 9 :endLine 13 :kind "region")
+                          '(:startLine 10 :endLine 12 :kind "region")
+                          '(:startLine 3 :endLine 7 :kind "proof")))
+          success)
+      (cl-letf (((symbol-function 'eglot-current-server) (lambda () 'server))
+                ((symbol-function 'eglot--TextDocumentIdentifier) (lambda () '(:uri "file:///F.lean")))
+                ((symbol-function 'kitty-lean--flush) #'ignore)
+                ((symbol-function 'jsonrpc-async-request)
+                 (lambda (_s method _params &rest args)
+                   (should (eq method :textDocument/foldingRange))
+                   (setq success (plist-get args :success-fn)))))
+        ;; the text changed after the question: the answer is dropped
+        (kitty-lean--fold-request)
+        (goto-char (point-max)) (insert "\n")
+        (funcall success answer)
+        (should-not kitty-lean--fold-ranges)
+        (delete-char -1)
+        ;; on open, with foldProofsByDefault: every proof but the one at point
+        (let ((kitty-lean-fold-proofs-by-default t))
+          (goto-char (point-min)) (forward-line 6)
+          (kitty-lean--fold-request)
+          (funcall success answer)
+          (should-not (kitty-lean-test--hidden-lines))
+          (goto-char (point-min))
+          (kitty-lean-unfold-proofs)
+          (kitty-lean-fold-proofs)
+          (should (equal (kitty-lean-test--hidden-lines) '(5 6 7 8)))
+          (kitty-lean-unfold-proofs)
+          (should-not (kitty-lean-test--hidden-lines))
+          ;; a second answer folds nothing by itself
+          (kitty-lean--fold-request)
+          (funcall success answer)
+          (should-not (kitty-lean-test--hidden-lines)))))))
+
+;;;; The webview's right-click menu
+
+(ert-deftest kitty-lean-webview-menu-names-only-what-the-infoview-hears ()
+  "Every entry of the page's right-click menu (webview/host.js) is one the
+shipped infoview answers to: a renamed entry in a new @leanprover/infoview
+would otherwise do nothing when clicked.  Its behaviour in a browser is
+recorded by the review's Playwright script."
+  (let ((bundle (and kitty-lean-webview-dist
+                     (expand-file-name "index.production.min.js" kitty-lean-webview-dist))))
+    (unless (and bundle (file-readable-p bundle))
+      (signal 'ert-test-skipped '("no @leanprover/infoview (KITTYMAX_LEAN_INFOVIEW)")))
+    (let ((js (with-temp-buffer (insert-file-contents bundle) (buffer-string)))
+          (entries nil))
+      (with-temp-buffer
+        (insert-file-contents (expand-file-name "lisp/lang/webview/host.js" kitty-lean-test--root))
+        (while (re-search-forward "item('\\([A-Za-z]+\\)'" nil t)
+          (push (match-string 1) entries)))
+      (should (> (length entries) 30))
+      (should-not (seq-remove (lambda (e) (or (string-search (format "\"%s\"" e) js)
+                                               (string-search (format "`%s:${" e) js)))
+                              entries)))))

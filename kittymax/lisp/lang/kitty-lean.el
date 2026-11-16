@@ -31,6 +31,7 @@
 (require 'compile)
 (require 'cl-lib)
 (require 'seq)
+(require 'hideshow)
 
 (defvar kitty-cache-dir)
 (defvar url-request-extra-headers)
@@ -110,6 +111,7 @@ A stray edit there breaks every project that uses it (lean.nvim's rule)."
 (defun kitty--lean-setup ()
   "A Lean buffer: abbreviations, the server, dependencies read-only."
   (abbrev-mode 1)
+  (kitty-lean--fold-setup)
   (when (kitty-lean-read-only-p buffer-file-name)
     (read-only-mode 1))
   ;; revert-buffer starts the mode again, forgetting the progress marks
@@ -382,6 +384,9 @@ An element, not a symbol: a list that starts with a symbol is a conditional.
           (setq kitty-lean--progress-timer
                 (run-at-time kitty-lean-progress-delay nil #'kitty-lean--draw-progress buffer)))
         ;; Checking finished: the goals at the cursor may only now exist.
+        (when (null now)
+          (unless (eql kitty-lean--fold-tick (buffer-chars-modified-tick))
+            (kitty-lean--fold-request)))
         (when (and was (null now) (kitty-lean--followed-p buffer))
           (kitty-lean-infoview-refresh buffer t))))))
 
@@ -493,6 +498,116 @@ An element, not a symbol: a list that starts with a symbol is a conditional.
         (setq kitty-lean--marks (cons done unsolved))
         (kitty-lean--draw-marks)))
     kept))
+
+;;;; Folding: Lean's folding ranges, through hideshow
+;;
+;; VS Code folds what Lean's textDocument/foldingRange says: declarations,
+;; namespaces and sections, imports, comments, and (Lean ≥ 4.37) proofs.
+;; eglot does not ask for them, so kittymax does, each time Lean finishes
+;; checking, and hands them to hideshow: evil's za zc zo zM zR fold them.
+;; Markers carry the ranges through edits until the next answer; an answer
+;; to an older text than the buffer's is dropped (the next check asks
+;; again).  test/kitty_lean_folding.tla is its model.
+
+(defcustom kitty-lean-fold-proofs-by-default nil
+  "Fold every proof but the one at point when a Lean file opens.
+VS Code's lean4.foldProofsByDefault; needs Lean 4.37 or newer."
+  :type 'boolean)
+
+(defvar-local kitty-lean--fold-ranges nil
+  "Lean's folding ranges, outermost first: (START END PROOF-P).
+START is a marker at the start of the first line, END at the end of the last.")
+(defvar-local kitty-lean--fold-tick nil "The text (chars-modified-tick) Lean's ranges are for.")
+(defvar-local kitty-lean--fold-default-done nil)
+
+(defun kitty-lean--fold-request ()
+  "Ask Lean for this buffer's folding ranges."
+  (when-let* ((server (eglot-current-server)))
+    (kitty-lean--flush)
+    (let ((buffer (current-buffer)) (tick (buffer-chars-modified-tick)))
+      (jsonrpc-async-request
+       server :textDocument/foldingRange (list :textDocument (eglot--TextDocumentIdentifier))
+       :success-fn (lambda (ranges)
+                     (when (and (buffer-live-p buffer)
+                                (= tick (buffer-chars-modified-tick buffer)))
+                       (with-current-buffer buffer
+                         (setq kitty-lean--fold-tick tick)
+                         (kitty-lean--folding-ranges ranges))))
+       :error-fn #'ignore :timeout-fn #'ignore))))
+
+(defun kitty-lean--folding-ranges (ranges)
+  "Take Lean's folding RANGES (a vector) for this buffer."
+  (dolist (r kitty-lean--fold-ranges)
+    (set-marker (nth 0 r) nil) (set-marker (nth 1 r) nil))
+  (save-excursion
+    (save-restriction
+      (widen)
+      (cl-flet ((at (line f) (goto-char (point-min)) (forward-line line) (copy-marker (funcall f) t)))
+        (setq kitty-lean--fold-ranges
+              (sort (mapcar (lambda (r)
+                              (list (at (plist-get r :startLine) #'pos-bol)
+                                    (at (plist-get r :endLine) #'pos-eol)
+                                    (equal (plist-get r :kind) "proof")))
+                            ranges)
+                    (lambda (a b) (or (< (car a) (car b))
+                                      (and (= (car a) (car b)) (> (cadr a) (cadr b))))))))))
+  (when (and kitty-lean-fold-proofs-by-default (not kitty-lean--fold-default-done)
+             (seq-some #'caddr kitty-lean--fold-ranges))
+    (setq kitty-lean--fold-default-done t)
+    (kitty-lean--fold-proofs t (point))))
+
+;; hideshow's questions, answered from the ranges
+
+(defun kitty-lean--fold-at (pos)
+  (seq-find (lambda (r) (= (car r) pos)) kitty-lean--fold-ranges))
+
+(defun kitty-lean--hs-looking-at-block-start ()
+  (when (kitty-lean--fold-at (point))
+    (set-match-data (list (point) (1+ (point))))
+    t))
+
+(defun kitty-lean--hs-forward (&rest _)
+  (goto-char (nth 1 (kitty-lean--fold-at (point)))))
+
+(defun kitty-lean--hs-find-block-beginning ()
+  (when-let* ((r (car (last (seq-filter (lambda (r) (<= (car r) (point) (nth 1 r)))
+                                         kitty-lean--fold-ranges)))))
+    (goto-char (car r))))
+
+(defun kitty-lean--hs-find-next-block (_regexp bound _comments)
+  (when-let* ((r (seq-find (lambda (r) (<= (point) (car r) bound)) kitty-lean--fold-ranges)))
+    (goto-char (min (1+ (car r)) (point-max)))
+    (set-match-data (list (car r) (point)))
+    t))
+
+(defun kitty-lean--fold-proofs (fold &optional except)
+  "Fold (FOLD non-nil) or unfold every proof, but one around EXCEPT."
+  (save-excursion
+    (dolist (r kitty-lean--fold-ranges)
+      (when (and (nth 2 r) (not (and except (<= (car r) except (nth 1 r)))))
+        (goto-char (car r))
+        (if fold (hs-hide-block-at-point)
+          (hs-discard-overlays (car r) (nth 1 r)))))))
+
+(defun kitty-lean-fold-proofs ()
+  "Fold every proof (VS Code's Fold All Proofs; Lean ≥ 4.37)."
+  (interactive)
+  (kitty-lean--fold-proofs t))
+
+(defun kitty-lean-unfold-proofs ()
+  "Unfold every proof (VS Code's Unfold All Proofs)."
+  (interactive)
+  (kitty-lean--fold-proofs nil))
+
+(defun kitty-lean--fold-setup ()
+  (setq-local hs-block-start-regexp nil
+              hs-block-end-regexp nil
+              hs-forward-sexp-function #'kitty-lean--hs-forward
+              hs-find-block-beginning-function #'kitty-lean--hs-find-block-beginning
+              hs-find-next-block-function #'kitty-lean--hs-find-next-block
+              hs-looking-at-block-start-predicate #'kitty-lean--hs-looking-at-block-start
+              hs-inside-comment-predicate #'ignore)
+  (hs-minor-mode 1))
 
 ;; Lean reports a file's diagnostics while it checks it, each time all of
 ;; them unless the client takes them in pieces: a file with 2000 messages
@@ -2318,6 +2433,8 @@ my-nvim's :LeanNew name [math]."
   "TAB" '("to the infoview" . kitty-lean-infoview-select)
   "v" '("infoview options" . kitty-lean-infoview-options)
   "d d" '("colour goal changes" . kitty-lean-infoview-toggle-diffs)
+  "z" '("fold all proofs" . kitty-lean-fold-proofs)
+  "Z" '("unfold all proofs" . kitty-lean-unfold-proofs)
   "w" '("VS Code's infoview" . kitty-lean-webview))
 
 (autoload 'kitty-lean-webview "kitty-lean-webview"

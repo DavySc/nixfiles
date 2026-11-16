@@ -13,21 +13,22 @@ below), `lisp/lang/kitty-lean-widgets.el` (Lean's widgets as text),
 elan from Nix to fetch each project's toolchain.
 
 Tested against Lean 4.35 and a real Lake project in `test/kitty-lean-test.el`
-(60 tests): the server, diagnostics, the infoview, progress, completion,
+(63 tests): the server, diagnostics, the infoview, progress, completion,
 definitions, hovers, `\` input, sorry, `Try this`, restart, `lake build` and
 run, and Org blocks with `C-c '`. Most of the rest are regression tests from
 two reviews that tried each feature against real Lean: K on subterms, session
 loss, pause, edits racing questions, failed, slow and hidden server starts,
 narrowed buffers, wide characters, and how fast Lean checks with the infoview
 open; the webview, served and relaying a real server; and eglot-booster left
-to buffering, since its bytecode mode garbles `⊢`. Seven TLA+ models
+to buffering, since its bytecode mode garbles `⊢`. Eight TLA+ models
 (`test/kitty_lean*.tla`) cover the timing: the infoview's refresh, the RPC
 session, one server per project (with the selected buffer and eglot's
 connect timeout), folds and buttons answered late (a trace's children,
 `[apply]` after an edit), diagnostics taken in pieces, the webview's
-calls, event streams and pages, and when a page is told the server
-restarted. TLC checks each model, and also checks that it rejects the
-broken versions that the reviews found.
+calls, event streams and pages, when a page is told the server
+restarted, and the editor's folding ranges, asked again for each text.
+TLC checks each model, and also checks that it rejects the broken
+versions that the reviews found.
 
 ## Editing
 
@@ -50,7 +51,7 @@ broken versions that the reviews found.
 | Rename | `grn` / `SPC c n` | done |
 | Call hierarchy | `M-x eglot-show-call-hierarchy` (Emacs 31) | done |
 | Outline, breadcrumbs, go to symbol | `gO` / `SPC c s` (imenu), `SPC s i` all buffers | done (no breadcrumbs bar) |
-| Folding (proof folding in Lean ≥ 4.37) | none (eglot has no folding ranges) | gap |
+| Folding: Lean's folding ranges (declarations, namespaces, imports, comments; proofs in Lean ≥ 4.37), Fold / Unfold All Proofs, `lean4.foldProofsByDefault` | kittymax asks Lean for them (eglot does not) each time it finishes checking, and hideshow folds them: `za` `zc` `zo` `zM` `zR`; `\z` / `\Z` fold / unfold all proofs; `kitty-lean-fold-proofs-by-default` | done |
 | Sticky scroll | none | gap |
 | Code actions: `#guard_msgs` update, imports for unknown identifiers, `Try this` | `gra` / `SPC c a` for all of them; `\s` takes a `Try this` at once | done |
 | Restart File (`Ctrl+Shift+X`), Restart Server | `\r` / `SPC m R` (rebuilds out-of-date imports), `\R` (also a start that hangs) | done |
@@ -134,9 +135,10 @@ extension does.  So everything VS Code's infoview draws, it draws:
 widgets with their own JavaScript (Penrose, plots, `conv?`'s subterm
 selection, custom React), hovers inside hovers, pins, the gear's view
 settings.  Its clicks act in Emacs: `Try this` edits the buffer,
-Ctrl-click opens the definition, "Restart File" restarts it.  Not there:
-its right-click menu, which is VS Code's own (copy, go to definition, the
-trace search); the rest of that menu is the gear's.
+Ctrl-click opens the definition, "Restart File" restarts it.  Its
+right-click menu is VS Code's (go to definition, select, pin, pause, copy
+state or message, trace search, and the "Settings…" entries), drawn by the
+page, since VS Code draws it outside the webview.
 
 What it costs, measured with Chromium on Lean 4.35:
 
@@ -165,6 +167,5 @@ and it is lighter.
 | Pictures inside a terminal Emacs (kitty's graphics protocol) | Emacs 31 does not speak it; a terminal Emacs opens `\w` in a browser instead |
 | Math in hover Markdown (KaTeX) in the text infoview | `K` shows the TeX; `\w`'s hovers render it |
 
-The remaining gaps: sticky scroll, folding ranges in the editor, and VS
-Code's project management (module hierarchy, lakefile schema, elan UI,
+The remaining gaps: sticky scroll, and VS Code's project management (module hierarchy, lakefile schema, elan UI,
 setup diagnostics).

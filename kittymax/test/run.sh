@@ -24,6 +24,7 @@ done
 #   kitty_lean_diags.tla  Lean's diagnostics taken in pieces, handed on once an interval
 #   kitty_lean_webview.tla VS Code's infoview in a page: answers, streams, pages gone
 #   kitty_lean_greet.tla  the page told "server restarted" only when it did
+#   kitty_lean_folding.tla the editor's folding ranges: asked per text, late answers dropped
 if command -v tlc >/dev/null 2>&1; then
     tmp=$(mktemp -d)
     # NAME MODULE EXPECT(pass|fail) [SED-ON-TLA] [SED-ON-CFG]
@@ -74,6 +75,9 @@ if command -v tlc >/dev/null 2>&1; then
     tlc_case webview-forgotten-page-carries-on kitty_lean_webview fail '' 's|Bug = "none"|Bug = "noreload"|'
     tlc_case greet kitty_lean_greet pass
     tlc_case greet-again-for-every-buffer kitty_lean_greet fail '' 's|Design = "fixed"|Design = "pr"|'
+    tlc_case folding kitty_lean_folding pass
+    tlc_case folding-no-text-check kitty_lean_folding fail '' 's|Design = "fixed"|Design = "nocheck"|'
+    tlc_case folding-on-busy-to-done kitty_lean_folding fail '' 's|Design = "fixed"|Design = "transition"|'
     tlc_case start-waiters-not-rearmed kitty_lean_start fail 's|/\\ ensure'"'"' = ensure \\cup {g \\in waiting : buf\[g\] = "open"}|/\\ UNCHANGED ensure|'
     rm -rf "$tmp"
 fi
