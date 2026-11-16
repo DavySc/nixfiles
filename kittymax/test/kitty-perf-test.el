@@ -194,5 +194,45 @@ only a sanity check."
   ;; nothing redraws every buffer's whitespace on every change
   (should-not (bound-and-true-p global-whitespace-mode)))
 
+(defun kitty-perf--startup-mb (home)
+  "Start kittymax with its state under HOME; the MB it holds once started.
+A real start in a child Emacs, early-init.el and all, on a terminal: a
+GUI start would put a window in front of you."
+  (let* ((out (expand-file-name "status" home))
+         (process-environment
+          (append (list (concat "XDG_DATA_HOME=" home "/data") (concat "XDG_CACHE_HOME=" home "/cache")
+                        "TERM=xterm-256color")
+                  process-environment))
+         (report `(add-hook 'emacs-startup-hook
+                            (lambda ()
+                              (copy-file "/proc/self/status" ,out t)
+                              (kill-emacs))
+                            90))
+         (proc (make-process :name "kittymax" :connection-type 'pty :noquery t :buffer nil
+                             :command (list (expand-file-name invocation-name invocation-directory)
+                                            "-nw" "--init-directory" kitty-perf--root
+                                            "--eval" (prin1-to-string report)))))
+    (set-process-window-size proc 50 180)
+    (with-timeout (120 (delete-process proc))
+      (while (process-live-p proc) (accept-process-output proc 0.1)))
+    (when (file-exists-p out)
+      (with-temp-buffer
+        (insert-file-contents out)
+        (when (re-search-forward "^VmRSS:[ \t]*\\([0-9]+\\) kB" nil t)
+          (/ (string-to-number (match-string 1)) 1024))))))
+
+(ert-deftest kitty-perf-startup-memory ()
+  "kittymax starts in under 200 MB.
+Never collecting garbage while starting left 289 MB (GUI) / 238 MB (terminal);
+collecting every 32 MB, 171 / 154 MB."
+  (skip-unless (file-readable-p "/proc/self/status"))
+  (let ((home (make-temp-file "kitty-home" t)))
+    (kitty-perf--startup-mb home)       ; the first start fills the caches
+    (let ((mb (kitty-perf--startup-mb home)))
+      (message "kittymax holds %s MB after starting" mb)
+      (should (numberp mb))
+      (should (< mb 200)))
+    (delete-directory home t)))
+
 (provide 'kitty-perf-test)
 ;;; kitty-perf-test.el ends here

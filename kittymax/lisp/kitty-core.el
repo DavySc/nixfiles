@@ -30,7 +30,7 @@
 
 ;;;; Performance
 
-;; Garbage collection: huge while Emacs is busy starting, then gcmh keeps it
+;; Garbage collection: 32 MB while Emacs is starting (early-init.el), then gcmh keeps it
 ;; high while editing and collects when idle.
 (setq gcmh-idle-delay 'auto
       gcmh-auto-idle-delay-factor 10
