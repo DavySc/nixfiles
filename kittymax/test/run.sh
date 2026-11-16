@@ -20,6 +20,7 @@ done
 #   kitty_lean.tla        the infoview's refresh (generations, forced refresh, flushed edits)
 #   kitty_lean_rpc.tla    Lean's RPC session, lost and found again
 #   kitty_lean_start.tla  one server per project while it starts
+#   kitty_lean_folds.tla  a trace's children and [apply] buttons, answered late
 if command -v tlc >/dev/null 2>&1; then
     tmp=$(mktemp -d)
     # NAME MODULE EXPECT(pass|fail) [SED-ON-TLA] [SED-ON-CFG]
@@ -52,6 +53,11 @@ if command -v tlc >/dev/null 2>&1; then
     tlc_case start-first-version kitty_lean_start fail '' 's|Design = "fixed"|Design = "pr"|'
     tlc_case start-no-note kitty_lean_start fail '' 's|Design = "fixed"|Design = "nonote"|'
     tlc_case start-eglot-timeout kitty_lean_start fail '' 's|Limit = 0|Limit = 1|'
+    tlc_case folds kitty_lean_folds pass
+    tlc_case folds-no-render-check kitty_lean_folds fail '' 's|Bug = "none"|Bug = "norender"|'
+    tlc_case folds-late-answer-kept kitty_lean_folds fail '' 's|Bug = "none"|Bug = "norelease"|'
+    tlc_case folds-unrendered-refresh-kept kitty_lean_folds fail '' 's|Bug = "none"|Bug = "nodrop"|'
+    tlc_case folds-button-any-text kitty_lean_folds fail '' 's|Bug = "none"|Bug = "notick"|'
     tlc_case start-waiters-not-rearmed kitty_lean_start fail 's|/\\ ensure'"'"' = ensure \\cup {g \\in waiting : buf\[g\] = "open"}|/\\ UNCHANGED ensure|'
     rm -rf "$tmp"
 fi

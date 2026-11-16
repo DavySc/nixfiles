@@ -47,7 +47,7 @@
 (kitty-load 'kitty-prog)
 (kitty-load 'kitty-rss)
 (dolist (lang '(kitty-msvc kitty-c kitty-csharp kitty-sql kitty-dbbliss kitty-sqldiff kitty-souffle
-                kitty-verilog kitty-nix kitty-lean))
+                kitty-verilog kitty-nix kitty-lean kitty-lean-widgets))
   (kitty-load lang))
 
 ;; Machine-specific settings (git-ignored): fonts, org directory, work SQL

@@ -8,18 +8,19 @@ or close; **partial**: the job, but less of it; **gap**: not there.
 The pieces: [nael](https://codeberg.org/mekeor/nael) (the major mode, `\`
 abbreviations, eglot setup for `lake serve`), eglot (the LSP client),
 `lisp/lang/kitty-lean.el` (the infoview, file progress, Lake, Org and the rest
-below), elan from Nix to fetch each project's toolchain.
+below), `lisp/lang/kitty-lean-widgets.el` (Lean's widgets as text), elan from Nix to fetch each project's toolchain.
 
 Tested against Lean 4.35 and a real Lake project in `test/kitty-lean-test.el`
-(39 tests): the server, diagnostics, the infoview, progress, completion,
+(51 tests): the server, diagnostics, the infoview, progress, completion,
 definitions, hovers, `\` input, sorry, `Try this`, restart, `lake build` and
 run, and Org blocks with `C-c '`. Most of the rest are regression tests from
 two reviews that tried each feature against real Lean: K on subterms, session
 loss, pause, edits racing questions, failed, slow and hidden server starts,
 narrowed buffers, wide characters, and how fast Lean checks with the infoview
-open. Three TLA+ models (`test/kitty_lean*.tla`) cover the timing: the
-infoview's refresh, the RPC session, and one server per project (with the
-selected buffer and eglot's connect timeout). TLC checks each model, and also
+open. Four TLA+ models (`test/kitty_lean*.tla`) cover the timing: the
+infoview's refresh, the RPC session, one server per project (with the
+selected buffer and eglot's connect timeout), and folds and buttons
+answered late (a trace's children, `[apply]` after an edit). TLC checks each model, and also
 checks that it rejects the broken versions that the reviews found.
 
 ## Editing
@@ -31,7 +32,7 @@ checks that it rejects the broken versions that the reviews found.
 | Syntax highlighting (TextMate) + semantic highlighting | nael's font-lock + eglot's semantic tokens (Emacs 31) | done |
 | Diagnostics: squiggles, Problems view | flymake: underlines, margin dots, end-of-line text; `SPC x x` project list; `]d` `[d` | done |
 | File progress: orange bars in the gutter, status bar | fringe bars on lines still being checked; ` ⧗ 42%` in the mode line (doom-modeline's misc-info) | done |
-| "Unsolved goals" / "Goals accomplished" gutter decorations (Lean ≥ 4.20) | the infoview says "No goals"; no gutter mark at the end of a proof | gap |
+| "Unsolved goals" / "Goals accomplished" gutter decorations (Lean ≥ 4.20) | ✓ in the right fringe beside a finished proof (at the end of the line in a terminal), 🛠 after the last line of one with goals left; Lean's silent "Goals accomplished!" kept out of flymake and the infoview, as VS Code does | done |
 | Hover (type, docstring) | eldoc in the echo area, `K` for the full doc | done |
 | Completion: identifiers, dot, tactics, structure fields, imports | corfu on eglot's completion | done |
 | Signature help | eldoc | done |
@@ -70,19 +71,19 @@ checks that it rejects the broken versions that the reviews found.
 | Tactic state: goals, case names, hypotheses | done, from `Lean.Widget.getInteractiveGoals` (falls back to `$/lean/plainGoal`) | done |
 | Goal diff highlighting (what this tactic changed) | inserted / removed parts coloured | done |
 | Expected type (term mode) | "Expected type" section (`getInteractiveTermGoal`) | done |
-| Messages at the cursor, full text | "Messages" section; a message spanning lines shows on each of them | done |
-| All Messages, with a count, sort, pause | the tally line ("All messages: 2 errors, 0 warnings, 1 info"); the list itself is `SPC x x` | partial |
-| Hover a term in the infoview: its type, docs, and hovers inside that | `K` on it, in a help buffer (no `K` inside that) | partial |
+| Messages at the cursor, full text | "Messages" section; a message spanning lines shows on each of them; interactive (its terms answer `K` and `gd`), since kittymax now tells Lean it can show widgets (`hasWidgets`, as VS Code does) | done |
+| All Messages, with a count, sort, pause | a folded "All messages: 2 errors, 0 warnings, 1 info" section: `TAB` lists every message (its first line, `RET` jumps there); `SPC x x` too | done (first lines only) |
+| Hover a term in the infoview: its type, docs, and hovers inside that | `K` on it, in a help buffer, the docstring as Markdown (no `K` inside that) | partial |
 | Go to definition from the infoview | `RET` / `gd` | done |
 | Pin a position: its whole state stays on screen in any file; unpin it, go to it | `\x` pins the goals (not the expected type or messages), shown in every file; `RET` on it goes there, `u` unpins it, `\c` clears all | partial |
 | Go to the infoview | `\ TAB` | done |
 | Pause, and refresh while paused | `\p`, or `p` in the infoview; no refresh while paused | partial |
-| Hide instances / types / inaccessible names / let values; emphasize first goal; reverse order; goal diffs on or off | `\v` turns diffs, types and instances on or off (`\dd` diffs); inaccessible names (`a✝`) shown dimmed | partial |
+| Hide instances / types / inaccessible names / let values; emphasize first goal; reverse order; goal diffs on or off | `\v`: diffs, types, instances, let values, target first (reverse), only the first goal unfolded (`\dd` diffs); inaccessible names (`a✝`) dimmed | done |
 | Diff against a pinned position (lean.nvim's `\dx`) | none | gap |
-| Collapse goals and sections | none | gap |
+| Collapse goals and sections | `TAB` (or `za`, or a click on ▾ ▸) folds a section, a goal (each titled by its case when there are several), a trace node, a widget's `<details>`; folds stay as you left them across refreshes | done |
 | Copy a goal to the editor / as a comment | yank from the infoview buffer | partial |
-| Widgets: `Try this` buttons, ProofWidgets, `conv?` shift-click, user widgets (React) | `Try this` through `\s` / code actions; no rendering of other widgets | gap |
-| Trace explorer (expandable `trace` messages) | traces as plain text | gap |
+| Widgets: `Try this` buttons, ProofWidgets, `conv?` shift-click, user widgets (React) | drawn as text from the widget's data (lean.nvim's way): `Try this` `[apply]` buttons (`RET` / click; refused if the file changed since), error-code explanations, ProofWidgets HTML (headings, lists, bold / italic / code, colours, links, tables, `<details>`, MakeEditLink, interactive terms) and `<svg>` as an image in a graphical Emacs. Widgets that need their own JavaScript (Penrose diagrams, `conv?`'s selection panel, plots, custom React) show their name and that they need VS Code | partial |
+| Trace explorer (expandable `trace` messages) | each trace node a fold, classes shortened under their parent; children asked from Lean only when opened (`lazyTraceChildrenToInteractive`, as VS Code), and again on each refresh while open (VS Code keeps them); flymake's copy of a trace message is "(trace: unfold it in the infoview)", since Lean sends only "(trace)" once widgets are on, as VS Code's Problems shows it; no trace search | done (no search) |
 | Theming | your Emacs theme's faces | done |
 
 ## Projects, Lake, elan
@@ -114,12 +115,23 @@ checks that it rejects the broken versions that the reviews found.
 - `\` abbreviations work inside `lean` blocks in the org buffer itself.
 - Tangling writes `.lean`; `<le` + `TAB` inserts a block.
 
-## The gaps that matter most
+## Rendering: how close it gets, and what cannot
 
-1. **Widgets** (ProofWidgets, `conv?`, custom user widgets): VS Code renders
-   React; nothing in Emacs does. `Try this` (the common one) works.
-2. **Infoview collapse / settings** and the **All Messages** list inside the
-   infoview.
-3. **End-of-proof gutter decorations** and the **trace explorer**.
-4. **Module hierarchy**, **lakefile schema**, **elan UI**, **setup
-   diagnostics**: VS Code's project management; here it is the shell.
+What VS Code draws with a browser (the infoview is a React page), kittymax
+draws as text in a buffer.  Everything that is data from Lean has a text
+form and is done: goals, diffs, interactive messages, folds, traces, proof
+marks, `Try this`, ProofWidgets' HTML.  What is left needs a JavaScript
+runtime:
+
+| | where it can work | cost |
+| --- | --- | --- |
+| Text widgets, folds, traces, marks, buttons | anywhere, terminal too | done here |
+| `<svg>` from ProofWidgets, fringe ✓ | graphical Emacs (kittymax is emacs-pgtk) | done here |
+| Widgets whose drawing is their own JavaScript: Penrose diagrams, plots, graph layouts, `conv?`'s subterm selection, custom React | only by running the real infoview: vscode-lean4's `lean4-infoview` package in a webview (Emacs built with xwidgets, which nixpkgs' emacs-pgtk is not by default) or a browser tab, with a bridge relaying its RPC to eglot's `lake serve` | days of work, a second UI to keep in step; not done |
+| Math in hover Markdown (KaTeX) | graphical Emacs could draw LaTeX as images; VS Code's hover does not either | not done |
+| Images in a terminal (kitty's graphics protocol) | Emacs does not speak it | not possible today |
+
+The remaining gaps: widgets made of JavaScript (above), trace search, the
+diff against a pinned position, sticky scroll, folding ranges in the
+editor, and VS Code's project management (module hierarchy, lakefile
+schema, elan UI, setup diagnostics).

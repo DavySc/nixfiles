@@ -25,6 +25,7 @@
         kitty-config-dir kitty-lean-test--root))
 (require 'kitty-lib)
 (require 'kitty-lean)
+(require 'kitty-lean-widgets)
 
 ;; `lake build''s own output (Lean 4.35)
 (defconst kitty-lean-test--lake-output "✖ [2/4] Building Demo.Bad (252ms)
@@ -73,6 +74,7 @@ error: build failed
   "Answers for an older request never overwrite a newer one, whatever their order;
 a failed answer leaves the infoview as it was."
   (let* ((calls nil)
+         (released nil)
          (rendered nil)
          (buf (generate-new-buffer "x.lean")))
     (cl-letf (((symbol-function 'kitty-lean--infoview-window) (lambda () t))
@@ -81,6 +83,8 @@ a failed answer leaves the infoview as it was."
               ((symbol-function 'kitty-lean--ask-goals) (lambda (_b pos cb) (push (list :goals pos cb) calls)))
               ((symbol-function 'kitty-lean--ask-term) (lambda (_b pos cb) (push (list :term pos cb) calls)))
               ((symbol-function 'kitty-lean--ask-messages) (lambda (_b pos cb) (push (list :messages pos cb) calls)))
+              ((symbol-function 'kitty-lean--ask-widgets) (lambda (_b pos cb) (push (list :widgets pos cb) calls)))
+              ((symbol-function 'kitty-lean--release) (lambda (_b _s refs) (setq released (append refs released))))
               ((symbol-function 'kitty-lean--render)
                (lambda (_b pos parts) (push (cons pos (plist-get parts :goals)) rendered))))
       (with-current-buffer buf
@@ -93,19 +97,23 @@ a failed answer leaves the infoview as it was."
         (kitty-lean-infoview-refresh buf)
         ;; the same place again: no new request
         (kitty-lean-infoview-refresh buf)
-        (should (= 6 (length calls)))
+        (should (= 8 (length calls)))
         (cl-flet ((answer (pos &optional fail)
                     (dolist (c calls)
                       (when (= (nth 1 c) pos)
-                        (funcall (nth 2 c) (if fail (cons nil nil) (cons t (list (format "goal at %d" pos)))))))))
+                        (funcall (nth 2 c) (if fail (cons nil nil)
+                                             (cons t (list (list :type (list :tag (vector (list :info (list :p (format "%d" pos))) '(:text "x"))))))))))))
           ;; the newer request is answered first, the older one after it
           (answer 20)
           (answer 5))
-        (should (equal rendered '((20 "goal at 20"))))
+        (should (equal (mapcar #'car rendered) '(20)))
+        ;; the older refresh is not shown: what its answers hold is released
+        ;; (four answers, each with the reference (:p "5"))
+        (should (equal released (make-list 4 '(:p "5"))))
         ;; forced (Lean finished the file): asked again; this time it fails
         (setq calls nil)
         (kitty-lean-infoview-refresh buf t)
-        (should (= 3 (length calls)))
+        (should (= 4 (length calls)))
         (dolist (c calls) (funcall (nth 2 c) (cons nil nil)))
         (should (= 1 (length rendered)))))
     (kill-buffer buf)))
@@ -142,6 +150,26 @@ a failed answer leaves the infoview as it was."
 
 (defvar kitty-lean-test--project nil)
 
+(defconst kitty-lean-test--widget-source
+  "import Lean
+open Lean Widget
+
+-- ProofWidgets' HtmlDisplay, as far as the infoview can tell: its id and props
+namespace ProofWidgets
+@[widget_module] def HtmlDisplay : Widget.Module where javascript := \"export default function(p) { return null }\"
+end ProofWidgets
+
+#widget ProofWidgets.HtmlDisplay with (json% {html: {element: [\"div\", [], [
+  {element: [\"h3\", [], [{text: \"A heading\"}]]},
+  {element: [\"p\", [], [{text: \"some   \"}, {element: [\"b\", [], [{text: \"bold\"}]]}, {text: \" text\"}]]},
+  {element: [\"ul\", [], [{element: [\"li\", [], [{text: \"one\"}]]}, {element: [\"li\", [], [{text: \"two\"}]]}]]},
+  {element: [\"details\", [], [{element: [\"summary\", [], [{text: \"More\"}]]}, {text: \"hidden body\"}]]}]]}})
+
+@[widget_module] def Unknown : Widget.Module where javascript := \"export default function(p) { return null }\"
+#widget Unknown
+"
+  "A Lean file with panel widgets: one kittymax draws, one it cannot.")
+
 (defun kitty-lean-test--project ()
   "A Lake project: a library with an error and an unfinished proof, a good module, main."
   (or kitty-lean-test--project
@@ -153,6 +181,11 @@ a failed answer leaves the infoview as it was."
         (kitty-lean-test--write dir "Demo/Good.lean" "def good : Nat := 42\n")
         (kitty-lean-test--write dir "Main.lean" "def main : IO Unit := IO.println \"hello from lean\"\n")
         (kitty-lean-test--write dir "Try.lean" "example (a b : Nat) : a + b = b + a := by\n  exact?\n")
+        (kitty-lean-test--write dir "Marks.lean"
+                                "theorem ok (a b : Nat) : a + b = b + a := by\n  omega\n\ntheorem bad (a b : Nat) : a + b = b + a := by\n  skip\n")
+        (kitty-lean-test--write dir "Trace.lean"
+                                "set_option trace.Meta.synthInstance true in\nexample : Inhabited Nat := inferInstance\n")
+        (kitty-lean-test--write dir "Widget.lean" kitty-lean-test--widget-source)
         (kitty-lean-test--write dir "Use.lean" "import Demo.Good\n#check good\ntheorem t (a b : Nat) : a + b = b + a := Nat.add_c\n")
         (let ((default-directory dir))
           (call-process "git" nil nil nil "init" "-q")
@@ -991,3 +1024,352 @@ symbol of the shortest one it starts; \\\\ is \; VS Code's \\h<>."
         (kitty-lean-infoview-unpin))
       (should-not kitty-lean--pins)
       (should (kitty-lean-test--wait 30 (lambda () (not (string-match-p "Pinned" (kitty-lean-test--infoview-text)))))))))
+
+;;;; Rendering: widgets, folds, proof marks (VS Code's infoview, as text)
+
+(ert-deftest kitty-lean-tells-lean-what-it-can-show ()
+  "Lean gets `hasWidgets' (else every message comes flattened) and silent
+diagnostics support (the ✓ marks), as from VS Code; other servers nothing."
+  (cl-letf (((symbol-function 'eglot--major-modes) (lambda (s) (if (eq s 'lean) '(nael-mode) '(c-mode)))))
+    (should (equal (kitty-lean--initialization-options nil 'lean) '(:hasWidgets t)))
+    (should (equal (kitty-lean--initialization-options '(:a 1) 'lean) '(:a 1 :hasWidgets t)))
+    (should (equal (kitty-lean--initialization-options '(:a 1) 'c) '(:a 1)))
+    (should (equal (plist-get (kitty-lean--client-capabilities '(:workspace nil) 'lean) :lean)
+                   '(:silentDiagnosticSupport t)))
+    (should-not (plist-member (kitty-lean--client-capabilities '(:workspace nil) 'c) :lean))))
+
+(ert-deftest kitty-lean-silent-diagnostics-become-marks ()
+  (pcase-let ((`(,kept ,done ,unsolved)
+               (kitty-lean--split-diagnostics
+                (vector (list :range '(:start (:line 0 :character 0) :end (:line 1 :character 0))
+                              :isSilent t :leanTags [2] :severity 3 :message "Goals accomplished!")
+                        (list :range '(:start (:line 3 :character 43) :end (:line 4 :character 0))
+                              :fullRange '(:start (:line 3 :character 43) :end (:line 4 :character 6))
+                              :leanTags [1] :severity 1 :message "unsolved goals")
+                        (list :range '(:start (:line 6 :character 0) :end (:line 6 :character 3))
+                              :severity 2 :message "a warning")))))
+    (should (equal (mapcar (lambda (d) (plist-get d :message)) kept) '("unsolved goals" "a warning")))
+    (should (equal done '(0)))
+    (should (equal unsolved '(4)))))
+
+(ert-deftest kitty-lean-proof-marks ()
+  "✓ beside a finished proof, 🛠 after one with goals left; \"Goals
+accomplished!\" is no flymake note and no infoview message."
+  (kitty-lean-test--skip-unless-lean)
+  (kitty-lean-test--boot)
+  (let ((buf (kitty-lean-test--visit "Marks.lean")))
+    (should (kitty-lean-test--wait 60 (lambda () (eglot-managed-p))))
+    (should (kitty-lean-test--wait 60 (lambda () (and (kitty-lean-test--errors buf) (not (kitty-lean-busy-p buf))))))
+    (should (kitty-lean-test--wait 10 (lambda () (= 2 (length kitty-lean--mark-overlays)))))
+    (let ((marks (mapcar (lambda (o) (list (line-number-at-pos (overlay-start o)) (overlay-get o 'kitty-lean-mark)
+                                           (substring-no-properties (overlay-get o 'before-string))))
+                         kitty-lean--mark-overlays)))
+      ;; a terminal (batch Emacs is one): at the end of the line
+      (should (member '(1 done " ✓") marks))
+      (should (member '(5 unsolved " 🛠") marks)))
+    (should-not (seq-find (lambda (d) (string-match-p "Goals accomplished" (flymake-diagnostic-text d)))
+                          (flymake-diagnostics)))
+    (kitty-lean-infoview-open)
+    (goto-char (point-min)) (forward-line 1) (end-of-line)
+    (kitty-lean-infoview-refresh buf t)
+    (should (kitty-lean-test--infoview-shows 30 "No goals"))
+    (should-not (string-match-p "Goals accomplished" (kitty-lean-test--infoview-text)))
+    ;; in a graphical Emacs: the right fringe
+    (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) t)))
+      (kitty-lean--draw-marks))
+    (should (seq-find (lambda (o) (equal (get-text-property 0 'display (overlay-get o 'before-string))
+                                         '(right-fringe kitty-lean-done kitty-lean-done)))
+                      kitty-lean--mark-overlays))
+    ;; off
+    (let ((kitty-lean-proof-marks nil)) (kitty-lean--draw-marks))
+    (should-not kitty-lean--mark-overlays)
+    (kitty-lean--draw-marks)))
+
+(defun kitty-lean-test--visible ()
+  "The infoview's text as it is seen: without what folds hide."
+  (with-current-buffer kitty-lean-infoview-buffer-name
+    (let ((out nil) (pos (point-min)))
+      (while (< pos (point-max))
+        (let ((next (next-single-char-property-change pos 'invisible nil (point-max))))
+          (unless (invisible-p pos) (push (buffer-substring-no-properties pos next) out))
+          (setq pos next)))
+      (apply #'concat (nreverse out)))))
+
+(defun kitty-lean-test--iv-goto (regexp)
+  (with-current-buffer kitty-lean-infoview-buffer-name
+    (goto-char (point-min))
+    (should (re-search-forward regexp nil t))
+    (goto-char (match-beginning 0))))
+
+(ert-deftest kitty-lean-messages-are-interactive ()
+  "Lean's messages with their terms (K, gd), as VS Code gets them."
+  (kitty-lean-test--skip-unless-lean)
+  (kitty-lean-test--boot)
+  (let ((buf (kitty-lean-test--visit "Marks.lean")))
+    (should (kitty-lean-test--wait 60 (lambda () (eglot-managed-p))))
+    (should (kitty-lean-test--wait 60 (lambda () (and (kitty-lean-test--errors buf) (not (kitty-lean-busy-p buf))))))
+    (kitty-lean-infoview-open)
+    (goto-char (point-min)) (forward-line 4)
+    (kitty-lean-infoview-refresh buf t)
+    (should (kitty-lean-test--infoview-shows 30 "unsolved goals\na b : Nat"))
+    ;; the goal inside the message: its terms carry Lean's info
+    (kitty-lean-test--iv-goto "unsolved goals")
+    (with-current-buffer kitty-lean-infoview-buffer-name
+      (should (re-search-forward "⊢ a" nil t))
+      (backward-char)
+      (should (get-text-property (point) 'kitty-lean-info)))))
+
+(ert-deftest kitty-lean-traces-unfold-as-asked ()
+  "A trace is a fold; its children are asked from Lean when it is opened, and
+it stays open across refreshes; sections fold with TAB."
+  (kitty-lean-test--skip-unless-lean)
+  (kitty-lean-test--boot)
+  (clrhash kitty-lean--folds)
+  (let ((buf (kitty-lean-test--visit "Trace.lean")))
+    (should (kitty-lean-test--wait 60 (lambda () (eglot-managed-p))))
+    (should (kitty-lean-test--wait 60 (lambda () (and (flymake-diagnostics) (not (kitty-lean-busy-p buf))))))
+    (kitty-lean-infoview-open)
+    (goto-char (point-min)) (forward-line 1)
+    (kitty-lean-infoview-refresh buf t)
+    (should (kitty-lean-test--infoview-shows 30 "▸ \\[Meta.synthInstance\\] ✅️ Inhabited Nat"))
+    ;; collapsed, as Lean says: nothing asked yet
+    (should-not (string-match-p "new goal" (kitty-lean-test--infoview-text)))
+    (kitty-lean-test--iv-goto "\\[Meta.synthInstance\\]")
+    (with-current-buffer kitty-lean-infoview-buffer-name (kitty-lean-infoview-toggle-fold))
+    (should (kitty-lean-test--wait 30 (lambda () (string-match-p "new goal Inhabited Nat" (kitty-lean-test--visible)))))
+    ;; a child under its parent: its class shortened, folded as Lean says
+    (should (string-match-p "▾ \\[Meta.synthInstance\\] ✅️ Inhabited Nat\n  ▸ \\[Meta.synthInstance\\] ✅️ new goal Inhabited Nat\n  ▸ \\[apply\\] ✅️ apply instInhabitedNat"
+                            (kitty-lean-test--visible)))
+    ;; the children's terms are interactive too
+    (kitty-lean-test--iv-goto "new goal Inhabited")
+    (with-current-buffer kitty-lean-infoview-buffer-name
+      (search-forward "Inhabited") (backward-char 2)
+      (should (get-text-property (point) 'kitty-lean-info)))
+    ;; open a grandchild, refresh: still open, its children asked again
+    (kitty-lean-test--iv-goto "new goal")
+    (with-current-buffer kitty-lean-infoview-buffer-name (kitty-lean-infoview-toggle-fold))
+    (should (kitty-lean-test--wait 30 (lambda () (string-match-p "\\[instances\\] #\\[" (kitty-lean-test--visible)))))
+    (kitty-lean-infoview-refresh buf t)
+    (should (kitty-lean-test--wait 30 (lambda () (string-match-p "\\[instances\\] #\\[" (kitty-lean-test--visible)))))
+    ;; TAB on a section title folds it away, and it stays so
+    (kitty-lean-test--iv-goto "Messages (1)")
+    (with-current-buffer kitty-lean-infoview-buffer-name (kitty-lean-infoview-toggle-fold))
+    (should (string-match-p "▸ Messages (1)" (kitty-lean-test--visible)))
+    (should-not (string-match-p "synthInstance" (kitty-lean-test--visible)))
+    (kitty-lean-infoview-refresh buf t)
+    (should (kitty-lean-test--wait 30 (lambda () (string-match-p "▸ Messages (1)" (kitty-lean-test--infoview-text)))))
+    (should-not (string-match-p "synthInstance" (kitty-lean-test--visible)))
+    ;; All messages: folded, opened on request
+    (kitty-lean-test--iv-goto "All messages")
+    (with-current-buffer kitty-lean-infoview-buffer-name (kitty-lean-infoview-toggle-fold))
+    (should (string-match-p "▾ All messages: 0 errors, 0 warnings, 1 info.*\n2:27 info (trace: unfold it in the infoview" (kitty-lean-test--visible)))
+    (clrhash kitty-lean--folds)))
+
+(ert-deftest kitty-lean-a-late-trace-answer-is-dropped-and-released ()
+  "Children answered after the infoview moved on are not put in, and Lean is
+told it can forget them (test/kitty_lean_folds.tla)."
+  (let ((iv (get-buffer-create kitty-lean-infoview-buffer-name))
+        (src (generate-new-buffer "x.lean"))
+        callback released)
+    (cl-letf (((symbol-function 'kitty-lean--rpc-call)
+               (lambda (_b _p _m _params cb) (setq callback cb)))
+              ((symbol-function 'kitty-lean--release)
+               (lambda (_b _s refs) (setq released refs))))
+      (let ((kitty-lean--rendered src) (kitty-lean--shown-refs (list src "s" nil)) ov)
+        (with-current-buffer iv
+          (let ((inhibit-read-only t) (kitty-lean--pending-fills nil))
+            (erase-buffer) (delete-all-overlays)
+            (setq ov (kitty-lean--fold '(t) nil (lambda () (insert "[c] title"))
+                                       nil (lambda (o) (kitty-lean--trace-fetch o '(:p "9") "c"))))
+            (kitty-lean--fold-set ov t)
+            (should (string-match-p "…" (buffer-string)))
+            ;; the cursor moved: a new render
+            (cl-incf kitty-lean--render-id)
+            (funcall callback (cons t (vector '(:tag [(:trace (:cls "c" :indent 2 :msg (:tag [(:info (:p "10")) (:text "child")])
+                                                                :collapsed :json-false :children (:strict [])))
+                                                     (:text "")]))))
+            (should-not (string-match-p "child" (buffer-string)))
+            (should (equal released '((:p "10"))))))))
+    (kill-buffer src)))
+
+(defun kitty-lean-test--wait-button (buf label)
+  "Wait for the button LABEL in the infoview of BUF.  The first render can
+have flymake's plain copy of a message, when Lean's interactive one is not
+ready yet: so ask again until it is there."
+  (kitty-lean-test--wait
+   30 (lambda ()
+        (or (with-current-buffer kitty-lean-infoview-buffer-name
+              (goto-char (point-min))
+              (and (search-forward label nil t) (get-text-property (1- (point)) 'kitty-lean-action)))
+            (progn (kitty-lean-infoview-refresh buf t) (kitty-lean-test--wait 1 #'ignore) nil)))))
+
+(ert-deftest kitty-lean-try-this-applies-only-to-its-text ()
+  "Try this's [apply] in the infoview puts the suggestion in; after an edit
+it refuses (Lean's range is for the old text) and asks again."
+  (kitty-lean-test--skip-unless-lean)
+  (kitty-lean-test--boot)
+  (kitty-lean-test--write (kitty-lean-test--project) "Try2.lean"
+                          "example (a b : Nat) : a + b = b + a := by\n  exact?\n")
+  (let ((buf (kitty-lean-test--visit "Try2.lean")))
+    (should (kitty-lean-test--wait 60 (lambda () (eglot-managed-p))))
+    (kitty-lean-infoview-open)
+    (should (kitty-lean-test--wait 120 (lambda () (and (flymake-diagnostics) (not (kitty-lean-busy-p buf))))))
+    (goto-char (point-min)) (forward-line 1) (back-to-indentation)
+    (kitty-lean-infoview-refresh buf t)
+    (should (kitty-lean-test--infoview-shows 60 "Try this:\n  \\[apply\\] exact Nat.add_comm a b"))
+    (should (kitty-lean-test--wait-button buf "[apply]"))
+    ;; typed something since (and the infoview not asked again yet): refused
+    (kitty-lean-test--iv-goto "\\[apply\\]")
+    (with-current-buffer buf (goto-char (point-max)) (insert " "))
+    (with-current-buffer kitty-lean-infoview-buffer-name
+      (should (string-match-p "changed since"
+                              (cadr (should-error (kitty-lean-infoview-goto) :type 'user-error)))))
+    (should (equal (with-current-buffer buf (buffer-substring-no-properties (point-min) (point-max)))
+                   "example (a b : Nat) : a + b = b + a := by\n  exact?\n "))
+    (with-current-buffer buf (delete-char -1) (kitty-lean-test--sync)
+                         (goto-char (point-min)) (forward-line 1) (back-to-indentation))
+    (kitty-lean-infoview-refresh buf t)
+    (should (kitty-lean-test--wait 30 (lambda () (eql kitty-lean--rendered-tick (buffer-chars-modified-tick buf)))))
+    (should (kitty-lean-test--wait-button buf "[apply]"))
+    (kitty-lean-test--iv-goto "\\[apply\\]")
+    (with-current-buffer kitty-lean-infoview-buffer-name (kitty-lean-infoview-goto))
+    (should (equal (with-current-buffer buf (buffer-substring-no-properties (point-min) (point-max)))
+                   "example (a b : Nat) : a + b = b + a := by\n  exact Nat.add_comm a b\n"))
+    (with-current-buffer buf (set-buffer-modified-p nil))))
+
+(ert-deftest kitty-lean-panel-widgets ()
+  "A ProofWidgets HtmlDisplay at the cursor is drawn as text; a widget made
+of JavaScript only says so."
+  (kitty-lean-test--skip-unless-lean)
+  (kitty-lean-test--boot)
+  (clrhash kitty-lean--folds)
+  (let ((buf (kitty-lean-test--visit "Widget.lean")))
+    (should (kitty-lean-test--wait 60 (lambda () (eglot-managed-p))))
+    (should (kitty-lean-test--wait 120 (lambda () (not (kitty-lean-busy-p buf)))))
+    (kitty-lean-infoview-open)
+    (goto-char (point-min)) (re-search-forward "^#widget ProofWidgets")
+    (kitty-lean-infoview-refresh buf t)
+    (should (kitty-lean-test--infoview-shows 60 "▾ Widgets\nA heading\nsome bold text\n• one\n• two\n▸ More"))
+    (should-not (string-match-p "hidden body" (kitty-lean-test--visible)))
+    (with-current-buffer kitty-lean-infoview-buffer-name
+      (goto-char (point-min)) (search-forward "bold")
+      (should (memq 'bold (ensure-list (get-text-property (1- (point)) 'face)))))
+    (kitty-lean-test--iv-goto "More")
+    (with-current-buffer kitty-lean-infoview-buffer-name (kitty-lean-infoview-toggle-fold))
+    (should (string-match-p "▾ More\nhidden body" (kitty-lean-test--visible)))
+    (goto-char (point-min)) (re-search-forward "^#widget Unknown")
+    (kitty-lean-infoview-refresh buf t)
+    (should (kitty-lean-test--infoview-shows 60 "Unknown  (drawn by JavaScript"))
+    (clrhash kitty-lean--folds)))
+
+(ert-deftest kitty-lean-widget-html-as-text ()
+  "ProofWidgets' HTML: tables aligned, colours, links, <svg> as XML for an image."
+  (with-temp-buffer
+    (kitty-lean-widgets--html
+     '(:element ["table" [] [(:element ["thead" [] [(:element ["tr" [] [(:element ["th" [] [(:text "n")]])
+                                                                       (:element ["th" [] [(:text "square")]])]])]])
+                            (:element ["tbody" [] [(:element ["tr" [] [(:element ["td" [] [(:text "10")]])
+                                                                       (:element ["td" [] [(:text "100")]])]])]])]]))
+    (should (equal (buffer-substring-no-properties (point-min) (point-max))
+                   "n  │ square\n───┼───────\n10 │ 100\n")))
+  (with-temp-buffer
+    (kitty-lean-widgets--html '(:element ["span" [["style" "color: red; font-weight: bold"]] [(:text "x")]]))
+    (should (equal (get-text-property 1 'face) '(:foreground "red" :weight bold))))
+  ;; React's style objects: fontWeight is font-weight
+  (with-temp-buffer
+    (kitty-lean-widgets--html '(:element ["span" [["style" (:color "red" :fontWeight "bold")]] [(:text "x")]]))
+    (should (equal (get-text-property 1 'face) '(:foreground "red" :weight bold))))
+  (with-temp-buffer
+    (kitty-lean-widgets--html '(:element ["a" [["href" "https://lean-lang.org"]] [(:text "Lean")]]))
+    (should (get-text-property 1 'kitty-lean-action))
+    (kitty-lean-widgets--html '(:element ["a" [["href" "javascript:alert(1)"]] [(:text "no")]]))
+    (should-not (get-text-property 5 'kitty-lean-action)))
+  (should (equal (kitty-lean-widgets--xml '(:element ["svg" [["width" 10]] [(:element ["circle" [["r" 4]] []])]]))
+                 "<svg width=\"10\" xmlns=\"http://www.w3.org/2000/svg\"><circle r=\"4\"></circle></svg>"))
+  ;; an unknown widget in a message: the message's own text for it
+  (should-not (with-temp-buffer (kitty-lean-widgets-insert '(:id "Some.Js.Widget" :props nil) t))))
+
+(ert-deftest kitty-lean-goal-view-options ()
+  "Hide let values, target first (reverseTacticState), only the first goal open."
+  (let ((g1 '(:userName "h" :hyps [(:names ["x"] :type (:text "Nat") :val (:text "5"))
+                                   (:names ["y"] :type (:text "Nat"))]
+                        :type (:text "x = y")))
+        (g2 '(:hyps [] :type (:text "True"))))
+    (cl-flet ((show (&rest goals)
+                (with-temp-buffer
+                  (let ((kitty-lean--fold-path nil) (kitty-lean--pending-fills nil))
+                    (kitty-lean--insert-goals goals 'test))
+                  (let (out (pos (point-min)))
+                    (while (< pos (point-max))
+                      (let ((next (next-single-char-property-change pos 'invisible nil (point-max))))
+                        (unless (invisible-p pos) (push (buffer-substring-no-properties pos next) out))
+                        (setq pos next)))
+                    (apply #'concat (nreverse out))))))
+      (clrhash kitty-lean--folds)
+      (should (equal (show g1) "case h\nx : Nat := 5\ny : Nat\n⊢ x = y\n\n"))
+      (let ((kitty-lean-infoview-hide-let-values t))
+        (should (equal (show g1) "case h\nx : Nat\ny : Nat\n⊢ x = y\n\n")))
+      (let ((kitty-lean-infoview-reverse t))
+        (should (equal (show g1) "case h\n⊢ x = y\ny : Nat\nx : Nat := 5\n\n")))
+      ;; several: each folds under its case
+      (should (equal (show g1 g2) "▾ case h\nx : Nat := 5\ny : Nat\n⊢ x = y\n\n▾ goal 2 of 2\n⊢ True\n\n"))
+      (let ((kitty-lean-infoview-emphasize-first-goal t))
+        (should (equal (show g1 g2) "▾ case h\nx : Nat := 5\ny : Nat\n⊢ x = y\n\n▸ Other goals (1)\n"))))))
+
+(ert-deftest kitty-lean-review-fixes ()
+  "What the review of the rendering found: references outside a proof,
+TAB at the end of a closed title, edits that start at one place."
+  ;; outside a proof the goals are :none: the other answers' references count
+  (should (= 3 (length (kitty-lean--answer-refs
+                        (list :goals :none :term nil
+                              :pins (list (cl-list* 'm "1:0" (list '(:type (:tag [(:info (:p "1")) (:text "a")])))))
+                              :messages (list (list nil 1 '(:tag [(:info (:p "2")) (:text "b")])))
+                              :widgets (list '(:id "w" :props (:x (:p "3")))))))))
+  ;; TAB anywhere on a closed fold's line, even past its end, is that fold
+  (with-temp-buffer
+    (let ((kitty-lean--fold-path nil) (kitty-lean--pending-fills nil) ov)
+      (setq ov (kitty-lean--fold '(a) t (lambda () (insert "Expected type")) (lambda () (insert "\n⊢ True"))))
+      (insert "\n\n")
+      (kitty-lean--fold '(b) t (lambda () (insert "  [c] trace")) nil (lambda (_) nil))
+      (kitty-lean--fold-set ov nil)
+      (goto-char (overlay-end ov))
+      (should (eq (kitty-lean--fold-at-point) ov))
+      (goto-char (point-max))
+      (should-not (eq (kitty-lean--fold-at-point) ov))
+      (should (kitty-lean--fold-at-point))))
+  ;; LSP edits all speak of the text before any: in their order
+  (with-temp-buffer
+    (insert "abc")
+    (cl-letf (((symbol-function 'kitty-lean--lsp-point)
+               (lambda (_b p) (+ 1 (plist-get p :character))))
+              ((symbol-function 'select-window) #'ignore)
+              ((symbol-function 'display-buffer) #'ignore))
+      (kitty-lean-widgets--apply (current-buffer)
+                                 (list '(:range (:start (:line 0 :character 0) :end (:line 0 :character 0)) :newText "X")
+                                       '(:range (:start (:line 0 :character 0) :end (:line 0 :character 1)) :newText "Y")
+                                       '(:range (:start (:line 0 :character 3) :end (:line 0 :character 3)) :newText "A")
+                                       '(:range (:start (:line 0 :character 3) :end (:line 0 :character 3)) :newText "B"))))
+    (should (equal (buffer-string) "XYbcAB")))
+  ;; two alike traces under one parent are two folds
+  (with-temp-buffer
+    (let ((kitty-lean--fold-path nil) (kitty-lean--pending-fills nil) (kitty-lean--refs nil))
+      (clrhash kitty-lean--folds)
+      (kitty-lean--insert-trace-children
+       (vector '(:tag [(:trace (:cls "c" :indent 0 :collapsed t :msg (:text "same") :children (:strict [(:text "x")]))) (:text "")])
+               '(:tag [(:trace (:cls "c" :indent 0 :collapsed t :msg (:text "same") :children (:strict [(:text "y")]))) (:text "")]))
+       "p")
+      (goto-char (point-min)) (search-forward "same")
+      (kitty-lean-infoview-toggle-fold)
+      (should (= 1 (hash-table-count kitty-lean--folds)))
+      (clrhash kitty-lean--folds))))
+
+(ert-deftest kitty-lean-marks-are-cheap ()
+  "Proof marks for a long file: one pass, not one per mark from the top."
+  (with-temp-buffer
+    (dotimes (_ 20000) (insert "  simp\n"))
+    (setq kitty-lean--marks (cons (number-sequence 0 19990 10) nil))
+    (let ((t0 (float-time)))
+      (kitty-lean--draw-marks)
+      (should (< (- (float-time) t0) 0.3)))
+    (should (= 2000 (length kitty-lean--mark-overlays)))
+    (should (= 11 (line-number-at-pos (overlay-start (nth 1998 kitty-lean--mark-overlays)))))))
