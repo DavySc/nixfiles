@@ -3,10 +3,11 @@
 ;; Everything here exists to make startup fast and to stop the frame from
 ;; flashing: it runs before package setup and before the first frame is drawn.
 
-;; Startup is a burst of allocation: never collect garbage until it is over
-;; (kitty-core.el hands the threshold to gcmh afterwards).
-(setq gc-cons-threshold most-positive-fixnum
-      gc-cons-percentage 0.6)
+;; Startup is a burst of allocation: collect garbage every 32 MB, not every
+;; 0.8 MB (kitty-core.el hands the threshold to gcmh afterwards).  Never
+;; collecting cost a third more memory for good: Emacs keeps what its garbage
+;; took (test/kitty-perf-test.el keeps startup under 200 MB).
+(setq gc-cons-threshold (* 32 1024 1024))
 
 ;; Every file loaded at startup goes through these handlers; none is needed yet.
 (defvar kitty--file-name-handler-alist file-name-handler-alist)
