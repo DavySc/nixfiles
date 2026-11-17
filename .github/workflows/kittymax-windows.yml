@@ -1,0 +1,45 @@
+# kittymax's Lean 4 tests on native Windows: GNU Emacs 31.1 (the build winget
+# installs), elan from its own installer, the packages the suite needs from git.
+name: kittymax on Windows
+on:
+  workflow_dispatch:
+  push:
+    paths: ['kittymax/**', '.github/workflows/kittymax-windows.yml']
+jobs:
+  lean:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Emacs 31.1
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -UseBasicParsing -OutFile emacs.zip https://ftp.gnu.org/gnu/emacs/windows/emacs-31/emacs-31.1.zip
+          Expand-Archive emacs.zip -DestinationPath C:\emacs
+          $bin = (Get-ChildItem -Recurse C:\emacs -Filter emacs.exe | Select-Object -First 1).DirectoryName
+          Add-Content $env:GITHUB_PATH $bin
+      - name: elan
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -UseBasicParsing -OutFile elan-init.ps1 https://raw.githubusercontent.com/leanprover/elan/master/elan-init.ps1
+          .\elan-init.ps1 -NoPrompt 1 -DefaultToolchain stable
+          Add-Content $env:GITHUB_PATH "$env:USERPROFILE\.elan\bin"
+      - name: Packages and VS Code's infoview
+        shell: bash
+        run: |
+          mkdir -p ../pkgs && cd ../pkgs
+          for r in emacsmirror/nael emacs-evil/evil minad/consult emacs-compat/compat emacs-evil/goto-chg; do git clone -q --depth 1 https://github.com/$r; done
+          mkdir iv && cd iv && npm pack -q @leanprover/infoview@0.14.0 && tar xzf leanprover-infoview-0.14.0.tgz
+      - name: Lean suite
+        shell: bash
+        run: |
+          emacs --version | head -1; lean --version; lake --version
+          export KITTYMAX_LEAN_INFOVIEW=$(cd ../pkgs/iv/package/dist && pwd -W)
+          P=../../pkgs
+          cd kittymax
+          emacs --batch -q -L lisp -L lisp/lang -L $P/nael/nael -L $P/evil -L $P/consult -L $P/compat -L $P/goto-chg \
+            -l test/kitty-lean-test.el -f ert-run-tests-batch-and-exit < /dev/null 2>&1 | tee lean.log
+          exit ${PIPESTATUS[0]}
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: lean-log, path: kittymax/lean.log }
